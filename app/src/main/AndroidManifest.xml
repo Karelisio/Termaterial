@@ -1,5 +1,15 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- Runtime-requested on API 33+ so the foreground-service notification below is visible;
+         the app still works if refused (POST_NOTIFICATIONS is entirely optional at runtime - see
+         MainActivity and docs/step-5-permissions.md). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Not runtime-prompted (normal/install-time permissions), required to run a foreground
+         service at all, and specifically with the "specialUse" type on API 34+. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+
     <application
         android:name=".TermaterialApplication"
         android:allowBackup="false"
@@ -20,6 +30,15 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name=".service.TerminalSessionService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keeps an interactive terminal shell session running when the app is in the background, the way a desktop terminal emulator keeps a shell alive." />
+        </service>
 
     </application>
 

@@ -17,4 +17,10 @@
 
     <string name="tab_new">Nouvel onglet</string>
     <string name="tab_close">Fermer l\'onglet</string>
+
+    <string name="notification_channel_name">Sessions terminal actives</string>
+    <string name="notification_channel_description">Notification persistante tant qu\'une session shell tourne, y compris en arrière-plan</string>
+    <string name="notification_title">Termaterial</string>
+    <string name="notification_content_single">Session active : %1$s</string>
+    <string name="notification_content_multi">%1$d sessions actives</string>
 </resources>

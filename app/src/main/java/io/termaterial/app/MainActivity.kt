@@ -1,13 +1,23 @@
 package io.termaterial.app
 
+import android.Manifest
+import android.content.ComponentName
+import android.content.Context
+import android.content.Intent
+import android.content.ServiceConnection
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
+import android.os.IBinder
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -17,6 +27,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
+import io.termaterial.app.service.TerminalSessionService
 import io.termaterial.app.settings.SettingsRepository
 import io.termaterial.app.terminal.AppTerminalClient
 import io.termaterial.app.terminal.ExtraKeysState
@@ -32,8 +44,40 @@ import io.termaterial.shell.BootstrapShellSessionFactory
 import java.util.UUID
 
 class MainActivity : ComponentActivity() {
+
+    /** Bound once [ensureBackgroundServiceStarted] connects; null while unbound/before that. */
+    private val terminalSessionService = mutableStateOf<TerminalSessionService?>(null)
+
+    private val serviceConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
+            terminalSessionService.value = (binder as? TerminalSessionService.LocalBinder)?.getService()
+        }
+
+        override fun onServiceDisconnected(name: ComponentName?) {
+            terminalSessionService.value = null
+        }
+    }
+
+    private var boundToService = false
+
+    // POST_NOTIFICATIONS (API 33+) only controls whether the foreground-service notification is
+    // *visible*; the service itself starts and keeps the session alive either way (see
+    // TerminalSessionService and docs/step-5-permissions.md), so no result handling is needed
+    // here beyond letting the system remember the user's choice - this is the "degrade
+    // gracefully rather than crash" the task asks for.
+    private val requestNotificationPermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            requestNotificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+
         val settingsRepository = SettingsRepository(applicationContext)
         setContent {
             val settings by settingsRepository.settings.collectAsState()
@@ -45,15 +89,37 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background,
                 ) {
-                    TermaterialApp(settingsRepository)
+                    TermaterialApp(
+                        settingsRepository = settingsRepository,
+                        service = terminalSessionService,
+                        onEnsureBackgroundServiceStarted = ::ensureBackgroundServiceStarted,
+                    )
                 }
             }
+        }
+    }
+
+    private fun ensureBackgroundServiceStarted() {
+        if (boundToService) return
+        boundToService = true
+        TerminalSessionService.start(this)
+        bindService(Intent(this, TerminalSessionService::class.java), serviceConnection, Context.BIND_AUTO_CREATE)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        if (boundToService) {
+            runCatching { unbindService(serviceConnection) }
         }
     }
 }
 
 @Composable
-private fun TermaterialApp(settingsRepository: SettingsRepository) {
+private fun TermaterialApp(
+    settingsRepository: SettingsRepository,
+    service: State<TerminalSessionService?>,
+    onEnsureBackgroundServiceStarted: () -> Unit,
+) {
     val context = LocalContext.current
     val installer = remember { BootstrapInstaller(context) }
     val settings by settingsRepository.settings.collectAsState()
@@ -100,6 +166,15 @@ private fun TermaterialApp(settingsRepository: SettingsRepository) {
             TerminalColorSchemeApplier.apply(settings.terminalPalette, sessions = emptyList(), view = null)
             openNewTab()
         }
+        if (isInstalled && tabs.isNotEmpty()) {
+            onEnsureBackgroundServiceStarted()
+        }
+    }
+
+    // Keep the foreground-service notification (Step 5) in sync with the open tabs.
+    val activeTabTitle = tabs.firstOrNull { it.id == activeTabId }?.title?.value
+    LaunchedEffect(tabs.size, activeTabTitle, service.value) {
+        service.value?.updateStatus(sessionCount = tabs.size, activeTitle = activeTabTitle)
     }
 
     val currentActiveId = activeTabId

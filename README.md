@@ -38,7 +38,11 @@ Le projet est construit étape par étape :
       terminal réel via `TerminalColorSchemeApplier`, dynamic color
       on/off), barre de touches spéciales (Ctrl/Alt en bascule, Tab, Esc,
       flèches). Voir [`docs/step-4-features.md`](docs/step-4-features.md).
-- [ ] Étape 5 — Permissions Android & foreground service
+- [x] **Étape 5 — Permissions Android & foreground service** :
+      `POST_NOTIFICATIONS` demandée au runtime (dégrade proprement si
+      refusée), `TerminalSessionService` (foreground, type `specialUse`,
+      notification persistante) démarré dès qu'un onglet existe. Voir
+      [`docs/step-5-permissions.md`](docs/step-5-permissions.md).
 - [ ] Étape 6 — Build & vérification APK debug
 
 ## Structure
