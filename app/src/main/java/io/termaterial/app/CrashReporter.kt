@@ -22,15 +22,26 @@ object CrashReporter {
         val appContext = context.applicationContext
         val previousHandler = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
-            runCatching {
-                appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                    .edit()
-                    .putString(KEY_LAST_CRASH, throwable.stackTraceToString())
-                    .apply()
-            }
+            record(appContext, throwable.stackTraceToString())
             // Preserve default crash behaviour (including any OS-level crash dialog/report) -
             // this handler only records the trace, it does not try to suppress the crash.
             previousHandler?.uncaughtException(thread, throwable)
+        }
+    }
+
+    /**
+     * Records [message] as the last crash without going through the uncaught-exception handler -
+     * for spots that catch an exception themselves (so the app/process can keep running, or stop
+     * cleanly) but still want it surfaced on next launch, e.g. a caught failure to start the
+     * foreground service in [io.termaterial.app.service.TerminalSessionService].
+     */
+    fun record(context: Context, message: String) {
+        runCatching {
+            context.applicationContext
+                .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .putString(KEY_LAST_CRASH, message)
+                .apply()
         }
     }
 

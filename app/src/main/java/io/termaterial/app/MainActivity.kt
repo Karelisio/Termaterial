@@ -102,8 +102,14 @@ class MainActivity : ComponentActivity() {
     private fun ensureBackgroundServiceStarted() {
         if (boundToService) return
         boundToService = true
-        TerminalSessionService.start(this)
-        bindService(Intent(this, TerminalSessionService::class.java), serviceConnection, Context.BIND_AUTO_CREATE)
+        try {
+            TerminalSessionService.start(this)
+            bindService(Intent(this, TerminalSessionService::class.java), serviceConnection, Context.BIND_AUTO_CREATE)
+        } catch (e: Exception) {
+            // The terminal itself must keep working even if the background-keep-alive service
+            // can't start (see TerminalSessionService.onStartCommand for the same reasoning).
+            CrashReporter.record(this, "MainActivity.ensureBackgroundServiceStarted:\n\n${e.stackTraceToString()}")
+        }
     }
 
     override fun onDestroy() {

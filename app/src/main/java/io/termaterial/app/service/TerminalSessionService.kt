@@ -14,6 +14,7 @@ import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
+import io.termaterial.app.CrashReporter
 import io.termaterial.app.MainActivity
 import io.termaterial.app.R
 
@@ -44,8 +45,18 @@ class TerminalSessionService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startInForeground(sessionCount = 0, activeTitle = null)
-        return START_STICKY
+        try {
+            startInForeground(sessionCount = 0, activeTitle = null)
+        } catch (e: Exception) {
+            // Keeping a session alive in the background is a nice-to-have, not something the
+            // terminal itself depends on to function in the foreground - never let a failure to
+            // promote to foreground (e.g. a startForeground()/specialUse platform quirk on a
+            // given device/API level) crash the whole app. Recorded via CrashReporter so it is
+            // still visible on next launch even though it isn't fatal.
+            CrashReporter.record(this, "TerminalSessionService.startInForeground:\n\n${e.stackTraceToString()}")
+            stopSelf()
+        }
+        return START_NOT_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder = binder
