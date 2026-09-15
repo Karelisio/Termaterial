@@ -102,3 +102,34 @@ upload de l'APK en artefact. C'est la vérification de référence pour ce
 projet tant que ce bac à sable n'a pas accès à `dl.google.com` — regardez
 l'onglet **Actions** du dépôt après chaque push pour confirmer que ça
 compile réellement.
+
+## Bug natif trouvé sur appareil réel (JNI, `termux.c`)
+
+En testant l'APK sur un vrai appareil (Étape 6), l'app crashait de façon
+fiable juste après le lancement du shell, sans qu'aucun mécanisme côté Java
+(try/catch, `Thread.UncaughtExceptionHandler`) ne l'attrape — signe d'un
+crash natif plutôt qu'une exception JVM. En relisant
+`Java_com_termux_terminal_JNI_createSubprocess` dans `termux.c` (copié
+tel quel de termux-app à cette étape), une ligne libérait le mauvais
+`jstring` :
+
+```c
+char const* cmd_cwd = (*env)->GetStringUTFChars(env, cwd, NULL);
+...
+(*env)->ReleaseStringUTFChars(env, cmd, cmd_cwd); // faux : cmd_cwd vient de cwd, pas de cmd
+```
+
+La spécification JNI exige que `ReleaseStringUTFChars` soit appelé avec le
+*même* `jstring` que celui passé au `GetStringUTFChars` correspondant.
+Ce genre d'erreur est un comportement indéfini que l'ART « release »
+tolère généralement en silence, mais que **CheckJNI** — activé
+automatiquement sur les builds `debuggable` (donc sur tout `assembleDebug`)
+— détecte et sanctionne par un arrêt immédiat du processus. C'est
+vraisemblablement pour ça que ce bug, présent tel quel dans termux-app
+amont, n'a jamais posé problème là-bas : Termux ne distribue que des
+builds release (CheckJNI désactivé), qui ne déclenchent jamais cette
+vérification stricte.
+
+Corrigé (`ReleaseStringUTFChars(env, cwd, cmd_cwd)`), sans rapport avec le
+point Android 10+ documenté dans `docs/step-2-shell-backend.md` (celui-ci
+reste un point ouvert distinct, à vérifier séparément).
