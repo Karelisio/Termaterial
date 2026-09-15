@@ -34,6 +34,12 @@ object CrashReporter {
      * for spots that catch an exception themselves (so the app/process can keep running, or stop
      * cleanly) but still want it surfaced on next launch, e.g. a caught failure to start the
      * foreground service in [io.termaterial.app.service.TerminalSessionService].
+     *
+     * Uses [android.content.SharedPreferences.Editor.commit] rather than `apply()`: `apply()`
+     * writes to disk asynchronously, and when this is called from the uncaught-exception handler
+     * the process may be torn down by the OS immediately after this function returns - too soon
+     * for an async write to land, silently losing the report. `commit()` blocks until the write
+     * has actually happened.
      */
     fun record(context: Context, message: String) {
         runCatching {
@@ -41,7 +47,7 @@ object CrashReporter {
                 .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                 .edit()
                 .putString(KEY_LAST_CRASH, message)
-                .apply()
+                .commit()
         }
     }
 

@@ -182,11 +182,16 @@ private fun TermaterialApp(
     // opening a fresh one rather than leaving the user stranded on no screen at all.
     LaunchedEffect(isInstalled, tabs.size, sessionRetryAttempt) {
         if (isInstalled && tabs.isEmpty() && sessionError == null) {
-            // Prime the (process-wide) terminal color scheme with the persisted palette before
-            // the first session's emulator is created, so it renders with the right colors from
-            // the start instead of flashing the xterm defaults. A no-op on later re-opens.
-            TerminalColorSchemeApplier.apply(settings.terminalPalette, sessions = emptyList(), view = null)
-            openNewTab()
+            try {
+                // Prime the (process-wide) terminal color scheme with the persisted palette
+                // before the first session's emulator is created, so it renders with the right
+                // colors from the start instead of flashing the xterm defaults. A no-op on later
+                // re-opens.
+                TerminalColorSchemeApplier.apply(settings.terminalPalette, sessions = emptyList(), view = null)
+                openNewTab()
+            } catch (e: Exception) {
+                sessionError = "${e.javaClass.simpleName}: ${e.message}\n\n${e.stackTraceToString()}"
+            }
         }
         if (isInstalled && tabs.isNotEmpty()) {
             onEnsureBackgroundServiceStarted()
