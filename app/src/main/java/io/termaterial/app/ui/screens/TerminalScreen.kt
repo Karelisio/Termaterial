@@ -107,6 +107,13 @@ fun TerminalScreen(
                     isFocusableInTouchMode = true
                     requestFocus()
                     terminalView = this
+                    // Bring up the IME as soon as the terminal is ready, rather than making the
+                    // user tap the screen first - onCheckIsTextEditor() lets an IME attach, but
+                    // nothing shows it automatically (a tap does too, via AppTerminalClient).
+                    post {
+                        val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager
+                        imm?.showSoftInput(this, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+                    }
                 }
             },
             update = { view ->

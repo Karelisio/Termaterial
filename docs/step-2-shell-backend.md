@@ -139,6 +139,29 @@ plus recent) :
   compilation croisee NDK consequent, a envisager seulement si le
   contournement `targetSdk` s'avere insuffisant.
 
+**Verifie sur appareil reel apres le contournement** : le shell demarre et
+un prompt `bash-5.3$` apparait. Deux points restants observes a ce moment-la :
+
+- `bash: /data/data/com.termux/files/usr/etc/profile: Permission denied` au
+  demarrage. Cause distincte du W^X ci-dessus : `--login` fait lire a bash
+  un chemin `/etc/profile` **fige a la compilation** par termux-packages
+  (`/data/data/com.termux/files/usr/etc/profile`), qui appartient au
+  bac a sable prive d'une autre app et ne peut donc jamais exister pour
+  Termaterial, quel que soit le remappage de `PREFIX`. Inoffensif (le shell
+  demarre quand meme) mais source de confusion, et de toute facon inutile
+  ici puisque `buildShellEnvironment` positionne deja directement
+  `HOME`/`PREFIX`/`PATH`/`LD_LIBRARY_PATH`/etc. - `BootstrapShellSessionFactory`
+  ajoute donc `--noprofile` aux arguments de `bash --login` pour eviter cette
+  tentative de lecture.
+- Le clavier virtuel ne s'affichait pas : `AppTerminalClient.onSingleTapUp`
+  etait un no-op dont le commentaire affirmait (a tort - jamais implemente)
+  que "le composable hote" s'en chargeait. `TerminalView.onCheckIsTextEditor()`
+  retourne bien `true` (une IME peut s'attacher), mais rien n'appelait
+  jamais `InputMethodManager.showSoftInput()`. Corrige a deux endroits :
+  `onSingleTapUp` l'appelle desormais (comme le fait le vrai Termux), et
+  `TerminalScreen.kt` l'appelle aussi une fois au premier affichage du
+  terminal pour eviter d'avoir a taper l'ecran manuellement.
+
 ## Permissions
 
 Ni `BootstrapInstaller` ni `BootstrapShellSessionFactory` ne necessitent de

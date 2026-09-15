@@ -6,6 +6,7 @@ import android.content.Context
 import android.util.Log
 import android.view.KeyEvent
 import android.view.MotionEvent
+import android.view.inputmethod.InputMethodManager
 import com.termux.terminal.TerminalSession
 import com.termux.terminal.TerminalSessionClient
 import com.termux.view.TerminalView
@@ -109,7 +110,10 @@ class AppTerminalClient(
     override fun onScale(scale: Float): Float = scale
 
     override fun onSingleTapUp(e: MotionEvent) {
-        // No-op: virtual keyboard is shown/hidden by the hosting Composable instead.
+        val terminalView = view ?: return
+        terminalView.requestFocus()
+        val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+        imm?.showSoftInput(terminalView, InputMethodManager.SHOW_IMPLICIT)
     }
 
     override fun shouldBackButtonBeMappedToEscape(): Boolean = false

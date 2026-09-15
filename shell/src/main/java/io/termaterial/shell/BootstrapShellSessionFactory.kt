@@ -46,7 +46,13 @@ class BootstrapShellSessionFactory {
         return TerminalSession(
             /* shellPath = */ bashFile.absolutePath,
             /* cwd = */ realHomeDir.absolutePath,
-            /* args = */ arrayOf(bashFile.absolutePath, "--login"),
+            // --noprofile: bash's --login otherwise sources /etc/profile from a path baked into
+            // the binary at compile time by termux-packages - literally
+            // /data/data/com.termux/files/usr/etc/profile, another app's private sandbox that can
+            // never exist for us no matter how PREFIX is remapped (confirmed on a real device:
+            // "Permission denied", harmless but confusing). Not a loss: we already set every env
+            // var that file would have (HOME/PREFIX/PATH/LD_LIBRARY_PATH/...) directly above.
+            /* args = */ arrayOf(bashFile.absolutePath, "--login", "--noprofile"),
             /* env = */ env.toTypedArray(),
             /* transcriptRows = */ transcriptRows,
             /* client = */ client,
