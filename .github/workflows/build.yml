@@ -44,7 +44,9 @@ jobs:
         run: |
           set -euo pipefail
           NDK_VERSION="$(grep '^ndkVersion=' gradle.properties | cut -d= -f2)"
-          yes | sdkmanager --licenses > /dev/null
+          # `yes` is killed by SIGPIPE once sdkmanager stops reading (all licenses accepted),
+          # which trips `pipefail` even though nothing actually went wrong - ignore that.
+          yes | sdkmanager --licenses > /dev/null || true
           sdkmanager \
             "platform-tools" \
             "platforms;android-${ANDROID_COMPILE_SDK_VERSION}" \
