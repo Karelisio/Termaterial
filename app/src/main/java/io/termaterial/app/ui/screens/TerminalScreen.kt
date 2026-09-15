@@ -87,11 +87,14 @@ fun TerminalScreen(
             factory = { context ->
                 StartupTrace.log(context, "TerminalScreen: creating TerminalView")
                 TerminalView(context, null).apply {
-                    // setTextSize()/setTypeface() must be called before attachSession(): they are
-                    // what create the TerminalRenderer that attachSession()'s updateSize() call
-                    // depends on.
-                    setTypeface(settings.monospaceFont.toTypeface())
+                    // setTextSize() must run first and before attachSession(): it is what
+                    // creates the TerminalRenderer (tolerating mRenderer == null by falling back
+                    // to Typeface.MONOSPACE), which attachSession()'s updateSize() call and
+                    // setTypeface() both depend on - setTypeface() reads mRenderer.mTextSize and
+                    // NPEs if called first (confirmed by a real-device crash: this order used to
+                    // be reversed here).
                     setTextSize(spToPx(context, settings.fontSizeSp))
+                    setTypeface(settings.monospaceFont.toTypeface())
                     StartupTrace.log(context, "TerminalScreen: renderer configured")
                     setTerminalViewClient(activeTab.client)
                     tabs.forEach { it.client.view = this }
@@ -107,8 +110,8 @@ fun TerminalScreen(
                 }
             },
             update = { view ->
-                view.setTypeface(settings.monospaceFont.toTypeface())
                 view.setTextSize(spToPx(view.context, settings.fontSizeSp))
+                view.setTypeface(settings.monospaceFont.toTypeface())
                 if (view.currentSession !== activeTab.session) {
                     view.setTerminalViewClient(activeTab.client)
                     view.attachSession(activeTab.session)

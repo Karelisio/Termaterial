@@ -37,6 +37,14 @@
 - `TerminalScreen.kt` applique `settings.monospaceFont`/`fontSizeSp` a la `TerminalView` via le
   parametre `update` d'`AndroidView` (appele a chaque recomposition).
 
+  **Bug reel trouve en testant sur appareil (corrige apres coup, voir Etape 6)** : en ajoutant
+  `setTypeface(settings.monospaceFont.toTypeface())`, l'appel a ete place *avant*
+  `setTextSize(...)` au lieu d'apres. Hors `TerminalView.setTypeface()` lit
+  `mRenderer.mTextSize` - et `mRenderer` n'existe que depuis le premier appel a `setTextSize()`
+  (voir la note de l'Etape 3 sur ce point precis). Resultat : `NullPointerException` a coup sur,
+  a chaque lancement, des la creation de la `TerminalView`. L'ordre correct est `setTextSize()`
+  **puis** `setTypeface()`.
+
 ### Vraies couleurs de terminal (et pas seulement le chrome Material)
 
 En explorant `TerminalColorScheme.java`/`TerminalColors.java` (module `terminal-emulator`,
