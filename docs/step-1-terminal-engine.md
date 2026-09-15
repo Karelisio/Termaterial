@@ -88,15 +88,17 @@ retrait des annotations `@TargetApi`/imports superflus — aucun ici), mais
 je n'ai **aucun moyen de confirmer par une compilation réelle** que tout
 s'assemble tant que je n'ai pas accès à `dl.google.com`/au SDK Android.
 
-**À faire de votre côté (ou en CI GitHub Actions, qui a accès à ces
-serveurs) pour valider cette étape :**
+Un workflow GitHub Actions (`.github/workflows/build.yml`) a été ajouté pour
+compenser : à chaque push, il installe le SDK/NDK Android (accessibles
+depuis les runners GitHub, contrairement à ce bac à sable), puis lance :
 
 ```
 ./gradlew :terminal-emulator:assembleDebug :terminal-view:assembleDebug
 ./gradlew :terminal-emulator:testDebugUnitTest
 ```
 
-Si vous avez un moyen de me donner accès à `dl.google.com`/`maven.google.com`
-dans cet environnement (ou si vous préférez que j'ajoute un workflow GitHub
-Actions qui le fait automatiquement à chaque push), dites-le-moi et je peux
-le mettre en place pour les étapes suivantes.
+et, dès que le module `app` existera (Étape 3+), `assembleDebug` dessus avec
+upload de l'APK en artefact. C'est la vérification de référence pour ce
+projet tant que ce bac à sable n'a pas accès à `dl.google.com` — regardez
+l'onglet **Actions** du dépôt après chaque push pour confirmer que ça
+compile réellement.

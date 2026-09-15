@@ -1,0 +1,57 @@
+name: Build
+
+on:
+  push:
+    branches: [main, "claude/**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Read NDK version from gradle.properties
+        id: ndk
+        run: echo "version=$(grep '^ndkVersion=' gradle.properties | cut -d= -f2)" >> "$GITHUB_OUTPUT"
+
+      - name: Install NDK
+        run: sdkmanager --install "ndk;${{ steps.ndk.outputs.version }}"
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build terminal-emulator and terminal-view
+        run: ./gradlew :terminal-emulator:assembleDebug :terminal-view:assembleDebug --stacktrace
+
+      - name: Run terminal-emulator unit tests
+        run: ./gradlew :terminal-emulator:testDebugUnitTest --stacktrace
+
+      - name: Build app (debug APK)
+        if: hashFiles('app/build.gradle.kts') != ''
+        run: ./gradlew :app:assembleDebug --stacktrace
+
+      - name: Upload debug APK
+        if: hashFiles('app/build.gradle.kts') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: termaterial-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: "**/build/reports/tests/**"
