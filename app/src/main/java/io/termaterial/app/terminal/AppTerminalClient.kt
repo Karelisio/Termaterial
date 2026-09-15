@@ -10,6 +10,7 @@ import com.termux.terminal.TerminalSession
 import com.termux.terminal.TerminalSessionClient
 import com.termux.view.TerminalView
 import com.termux.view.TerminalViewClient
+import io.termaterial.app.StartupTrace
 
 /**
  * [TerminalSessionClient] + [TerminalViewClient] implementation wiring a [TerminalSession] to a
@@ -140,7 +141,9 @@ class AppTerminalClient(
     override fun onCodePoint(codePoint: Int, ctrlDown: Boolean, session: TerminalSession): Boolean = false
 
     override fun onEmulatorSet() {
-        // No-op.
+        // The pty is live and the emulator is attached: startup got all the way through, so the
+        // next launch has nothing to report. See StartupTrace.
+        StartupTrace.log(context, StartupTrace.SESSION_READY)
     }
 
     companion object {

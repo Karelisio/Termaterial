@@ -70,6 +70,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        StartupTrace.log(this, "MainActivity.onCreate")
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) !=
@@ -79,6 +80,7 @@ class MainActivity : ComponentActivity() {
         }
 
         val settingsRepository = SettingsRepository(applicationContext)
+        StartupTrace.log(this, "settings loaded, calling setContent")
         setContent {
             val settings by settingsRepository.settings.collectAsState()
             TermaterialTheme(
@@ -149,12 +151,16 @@ private fun TermaterialApp(
     // crashes that happen inside an Android framework callback, e.g. TerminalView's layout pass,
     // which this composable cannot wrap in a try/catch of its own).
     var sessionError by remember {
-        mutableStateOf(CrashReporter.consumeLastCrash(context)?.let { "Crash au lancement précédent :\n\n$it" })
+        mutableStateOf(startupDiagnostics(context))
     }
     var sessionRetryAttempt by remember { mutableIntStateOf(0) }
 
     fun openNewTab() {
+        // Throwable, not Exception: System.loadLibrary("termux") failing inside JNI's static
+        // initializer surfaces as UnsatisfiedLinkError/ExceptionInInitializerError, which are
+        // Errors and would otherwise sail straight past this handler.
         try {
+            StartupTrace.log(context, "openNewTab: start")
             val id = UUID.randomUUID().toString()
             val title = mutableStateOf<String?>(null)
             val client = AppTerminalClient(
@@ -170,10 +176,12 @@ private fun TermaterialApp(
                 },
             )
             val session = BootstrapShellSessionFactory().createSession(context, client)
+            StartupTrace.log(context, "openNewTab: TerminalSession created")
             tabs.add(TerminalTab(id, session, client, title))
             activeTabId = id
-        } catch (e: Exception) {
-            sessionError = "${e.javaClass.simpleName}: ${e.message}\n\n${e.stackTraceToString()}"
+        } catch (t: Throwable) {
+            StartupTrace.log(context, "openNewTab: FAILED $t")
+            sessionError = "${t.javaClass.simpleName}: ${t.message}\n\n${t.stackTraceToString()}"
         }
     }
 
@@ -187,10 +195,12 @@ private fun TermaterialApp(
                 // before the first session's emulator is created, so it renders with the right
                 // colors from the start instead of flashing the xterm defaults. A no-op on later
                 // re-opens.
+                StartupTrace.log(context, "bootstrap installed, applying palette")
                 TerminalColorSchemeApplier.apply(settings.terminalPalette, sessions = emptyList(), view = null)
                 openNewTab()
-            } catch (e: Exception) {
-                sessionError = "${e.javaClass.simpleName}: ${e.message}\n\n${e.stackTraceToString()}"
+            } catch (t: Throwable) {
+                StartupTrace.log(context, "palette/openNewTab FAILED: $t")
+                sessionError = "${t.javaClass.simpleName}: ${t.message}\n\n${t.stackTraceToString()}"
             }
         }
         if (isInstalled && tabs.isNotEmpty()) {
@@ -256,3 +266,46 @@ private fun TermaterialApp(
         )
     }
 }
+
+/**
+ * Anything worth showing about how the *previous* launch went: a recorded crash, or a startup
+ * trace that stopped before the terminal was ready (which is what a native crash - invisible to
+ * any exception handler - looks like). Returns null when the last run looked healthy.
+ */
+private fun startupDiagnostics(context: Context): String? {
+    val crash = CrashReporter.consumeLastCrash(context)
+    val previousTrace = StartupTrace.previous(context)
+    val previousRunDiedEarly = previousTrace != null && !previousTrace.contains(StartupTrace.SESSION_READY)
+
+    if (crash == null && !previousRunDiedEarly) return null
+
+    return buildString {
+        if (crash != null) {
+            append("Crash au lancement précédent :\n\n")
+            append(crash)
+            append("\n\n")
+        }
+        if (previousRunDiedEarly) {
+            append("Le lancement précédent s'est arrêté avant que le terminal soit prêt.\n")
+            append("Trace (la dernière ligne indique où) :\n\n")
+            append(previousTrace)
+            append("\n")
+        }
+        append("\n--- Environnement ---\n")
+        append(environmentDiagnostics(context))
+    }
+}
+
+private fun environmentDiagnostics(context: Context): String = runCatching {
+    val prefix = io.termaterial.shell.TermaterialPaths.realPrefixDir(context)
+    val bash = io.termaterial.shell.TermaterialPaths.realBashBinary(context)
+    val nativeLibDir = java.io.File(context.applicationInfo.nativeLibraryDir)
+    buildString {
+        append("abis=${android.os.Build.SUPPORTED_ABIS.joinToString("/")}\n")
+        append("sdk=${android.os.Build.VERSION.SDK_INT}\n")
+        append("prefix=${prefix.absolutePath} exists=${prefix.isDirectory}\n")
+        append("bash exists=${bash.isFile} canExecute=${bash.canExecute()} size=${bash.length()}\n")
+        append("nativeLibDir=${nativeLibDir.absolutePath}\n")
+        append("nativeLibs=${nativeLibDir.list()?.joinToString(", ") ?: "(unreadable)"}\n")
+    }
+}.getOrElse { "diagnostics failed: $it" }

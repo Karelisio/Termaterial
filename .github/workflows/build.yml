@@ -69,6 +69,21 @@ jobs:
         if: hashFiles('app/build.gradle.kts') != ''
         run: ./gradlew :app:assembleDebug --stacktrace
 
+      # The pty is spawned through libtermux.so (terminal-emulator's ndkBuild output). If it were
+      # missing from the APK, System.loadLibrary() would throw UnsatisfiedLinkError deep inside
+      # TerminalView's layout pass at runtime - so assert it is packaged, for every ABI, here.
+      - name: Check native libraries are packaged in the APK
+        if: hashFiles('app/build.gradle.kts') != ''
+        run: |
+          set -euo pipefail
+          APK="$(ls app/build/outputs/apk/debug/*.apk | head -1)"
+          echo "APK: $APK"
+          unzip -l "$APK" | grep '\.so$' || true
+          if ! unzip -l "$APK" | grep -q 'lib/.*/libtermux\.so'; then
+            echo "::error::libtermux.so is missing from the APK - the pty JNI library was not packaged."
+            exit 1
+          fi
+
       - name: Upload debug APK
         if: hashFiles('app/build.gradle.kts') != ''
         uses: actions/upload-artifact@v4

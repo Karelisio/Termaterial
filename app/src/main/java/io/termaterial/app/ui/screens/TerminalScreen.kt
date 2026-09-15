@@ -24,6 +24,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.viewinterop.AndroidView
 import com.termux.view.TerminalView
 import io.termaterial.app.R
+import io.termaterial.app.StartupTrace
 import io.termaterial.app.settings.AppSettings
 import io.termaterial.app.terminal.ExtraKeysState
 import io.termaterial.app.terminal.TerminalTab
@@ -84,15 +85,21 @@ fun TerminalScreen(
                 .fillMaxSize()
                 .padding(innerPadding),
             factory = { context ->
+                StartupTrace.log(context, "TerminalScreen: creating TerminalView")
                 TerminalView(context, null).apply {
                     // setTextSize()/setTypeface() must be called before attachSession(): they are
                     // what create the TerminalRenderer that attachSession()'s updateSize() call
                     // depends on.
                     setTypeface(settings.monospaceFont.toTypeface())
                     setTextSize(spToPx(context, settings.fontSizeSp))
+                    StartupTrace.log(context, "TerminalScreen: renderer configured")
                     setTerminalViewClient(activeTab.client)
                     tabs.forEach { it.client.view = this }
+                    // attachSession() itself is cheap, but the layout pass it leads to is what
+                    // spawns the pty through JNI - the last thing that happens before the
+                    // terminal is live, and the step a native crash would die in.
                     attachSession(activeTab.session)
+                    StartupTrace.log(context, "TerminalScreen: attachSession returned")
                     isFocusable = true
                     isFocusableInTouchMode = true
                     requestFocus()
