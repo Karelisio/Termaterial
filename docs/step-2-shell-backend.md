@@ -1,18 +1,24 @@
-# Etape 2 - Shell backend (bootstrap + proot)
+# Etape 2 - Shell backend (bootstrap + exec direct)
+
+> Cette etape a ete revisee une fois en cours de route : la premiere version
+> utilisait `proot`, mais en telechargeant et en inspectant le vrai
+> `bootstrap-aarch64.zip` de termux-packages, il s'est avere que `proot`
+> n'est pas inclus dans le bootstrap publie officiellement. La section
+> "Ce qui a change" ci-dessous explique pourquoi et ce qui a ete fait a la
+> place, valide avec vous.
 
 ## Ce qui a ete fait
 
 Nouveau module `shell` (`io.termaterial.shell`), qui depend de `terminal-emulator`
 et n'a aucun lien avec l'UI :
 
-- **`TermaterialPaths`** - constantes de chemins : les chemins reels
-  (`<filesDir>/usr`, `<filesDir>/usr-staging`, `<filesDir>/home`) et les
-  chemins "virtuels" attendus par les binaires du bootstrap Termux
-  (`/data/data/com.termux/files/usr`, `.../home`).
+- **`TermaterialPaths`** - chemins reels dans le stockage prive de l'app :
+  `<filesDir>/usr` (prefix final), `<filesDir>/usr-staging` (extraction),
+  `<filesDir>/home`.
 - **`BootstrapArch`** - associe `Build.SUPPORTED_ABIS` au nom d'architecture
   utilise par les releases termux-packages (`aarch64`, `arm`, `x86_64`,
   `i686`) et au nom de fichier de l'archive (`bootstrap-<arch>.zip`).
-- **`BootstrapInstaller`** - classe separee de `TerminalSession` comme demande :
+- **`BootstrapInstaller`** - classe separee de la session shell, comme demande :
   - `isInstalled()` verifie un fichier marqueur (`.TERMATERIAL_BOOTSTRAP_VERSION`)
     contenant le tag de release installe ;
   - `install(forceReinstall)` retourne un `Flow<BootstrapProgress>`
@@ -22,126 +28,128 @@ et n'a aucun lien avec l'UI :
   - telecharge `bootstrap-<arch>.zip` depuis les releases GitHub de
     `termux/termux-packages` (tag configure dans `BOOTSTRAP_RELEASE_TAG`),
     l'extrait dans un dossier de staging, recree les symlinks listes dans
-    `SYMLINKS.txt` (meme format que termux-app : `cible<fleche-gauche>lien`),
-    positionne les bits d'execution sur `bin/`, `libexec`, `lib/apt/apt-helper`
-    et `lib/apt/methods`, puis bascule le staging vers le dossier final de
+    `SYMLINKS.txt` (`cible<fleche-gauche>lien`), positionne les bits
+    d'execution sur `bin/`, `libexec`, `lib/apt/apt-helper` et
+    `lib/apt/methods`, puis bascule le staging vers le dossier final de
     facon atomique (`renameTo`) ;
-  - `forceReinstall = true` permet de reinstaller/mettre a jour plus tard
-    (mentionne dans la demande).
-- **`ProotShellSessionFactory`** - construit une `TerminalSession` (module
-  `terminal-emulator` de l'Etape 1) dont le "shell" est en realite
-  `proot` (deja present dans le bootstrap, comme demande), qui execute
-  `bash --login` a l'interieur.
+  - `forceReinstall = true` permet de reinstaller/mettre a jour plus tard.
+- **`BootstrapShellSessionFactory`** - construit une `TerminalSession` (module
+  `terminal-emulator` de l'Etape 1) qui lance directement `bash --login` du
+  bootstrap extrait, avec un environnement corrige (voir plus bas).
 
-Un fichier `.gitignore` racine ignore deja `local.properties`/`build/` ; rien
-de plus a ajouter pour ce module.
+## Ce qui a change : pourquoi pas proot au final
 
-## Pourquoi proot pour lancer le propre shell de l'app (et pas seulement pour des distros invitees) ?
+La demande initiale precisait d'utiliser `proot` (present dans le bootstrap
+Termux) pour lancer le shell. En verifiant reellement le contenu d'un
+bootstrap publie (`git ls-remote` sur les tags de `termux-packages` pour
+trouver le tag courant, puis telechargement direct de
+`bootstrap-aarch64.zip` depuis les releases GitHub - accessible depuis ce
+bac a sable, contrairement a `dl.google.com`), deux choses se sont averees :
 
-En lisant les scripts de build de `termux/termux-packages`
-(`scripts/generate-bootstraps.sh`), deux faits importants ressortent :
+1. **Ce zip ne contient pas de binaire `proot`.** En lisant
+   `scripts/generate-bootstraps.sh` de `termux-packages`, `proot` n'est
+   `pull_package`-e que dans une variante speciale
+   (`BOOTSTRAP_ANDROID10_COMPATIBLE=true`), qui n'est pas celle que le
+   workflow GitHub Actions programme (`bootstrap_archives.yml`) publie
+   chaque semaine. Le bootstrap reellement telechargeable ne l'a donc
+   jamais eu.
+2. **Les binaires du bootstrap n'ont pas besoin de proot pour s'executer.**
+   `readelf -l bin/bash` montre `Requesting program interpreter:
+   /system/bin/linker64` : ce sont des executables ELF Android normaux,
+   lances directement par le vrai linker du systeme - exactement comme le
+   fait le vrai Termux (qui n'a plus utilise proot pour son propre
+   environnement depuis 2021). Le seul probleme reel est que
+   `readelf -d bin/bash` montre un `RUNPATH` fige a
+   `/data/data/com.termux/files/usr/lib` - un chemin qui n'existe pas ici
+   puisque Termaterial n'utilise pas ce nom de paquet.
 
-1. **Les binaires du bootstrap ont le chemin `/data/data/com.termux/files/usr`
-   code en dur** (shebang des scripts, RPATH/RUNPATH des binaires ELF,
-   metadonnees dpkg). Comme Termaterial n'utilise pas le nom de paquet
-   `com.termux`, ce chemin n'existe pas sur l'appareil. `proot` sert ici a
-   *remapper* ce chemin virtuel vers le vrai dossier prive de l'app, via des
-   bind mounts (`-b <reel>:<virtuel>`) - **pas** a executer une distribution
-   Linux etrangere (usage habituel de `proot-distro` dans le vrai Termux).
-2. Le script `generate-bootstraps.sh` construit en fait **deux variantes** de
-   bootstrap : la variante "classique" (execution directe des binaires,
-   utilisee par le vrai Termux depuis quelques annees, bootstrap precompile
-   dans l'APK) et une variante **"Android 10 compatible"** qui, elle,
-   `pull_package proot` explicitement - preuve que Termux lui-meme utilise
-   `proot` pour contourner la meme contrainte que nous rencontrons ici
-   (voir section suivante).
+Le linker dynamique Android consulte `LD_LIBRARY_PATH` **avant** le
+`RUNPATH` du binaire. Il suffit donc de positionner `LD_LIBRARY_PATH` sur le
+vrai dossier `lib` de l'app pour que `bash` trouve ses bibliotheques
+(`libreadline.so.8`, `libandroid-support.so`, `libiconv.so`, ...) sans
+bind mount, sans faux chroot, et sans la latence d'interception d'appels
+systeme de proot.
 
-C'est ce qui valide et motive le choix de l'enonce de la tache ("environnement
-chroote sans root").
-
-## Point d'attention reel : restriction d'execution Android 10+ (W^X)
-
-Depuis Android 10 (API 29), un fichier ecrit par l'app dans son propre
-dossier prive (`/data/data/<pkg>/files/...`) **ne peut generalement plus etre
-execute** (durcissement W^X applique par le systeme). C'est precisement pour
-cette raison que le vrai Termux a arrete de telecharger son bootstrap au
-premier lancement (ce que cette Etape 2 fait, comme demande) et l'embarque
-desormais **au moment du build** dans `app/src/main/jniLibs/<abi>/` (dossier
-natif de l'APK, exempte de cette restriction), sous la forme d'un
-`libtermux-bootstrap.so` contenant le zip en tant que donnees, plus un
-`proot` lui-meme place dans `jniLibs` pour la variante "Android 10
-compatible".
-
-Consequence concrete pour Termaterial : sur un appareil recent, `proot`
-telecharge et extrait a l'execution (comme specifie) risque de ne pas pouvoir
-etre lance directement par `execve()` sur certaines versions/configurations
-Android. Deux options pour la suite, a valider avec vous :
-
-1. **Vendoriser `proot` dans `jniLibs` au moment du build** (comme le fait
-   Termux) : ajouter une tache Gradle qui recupere le binaire `proot` officiel
-   par ABI et le place sous `app/src/main/jniLibs/<abi>/libproot.so` -
-   `proot` serait alors dans le dossier natif exempte de la restriction, et
-   resterait charge d'executer tout le reste (bash, apt, etc.) a l'interieur
-   de son bac a sable. C'est la solution robuste et perenne, alignee sur ce
-   que fait le vrai Termux.
-2. Ne rien changer pour l'instant et traiter ce point avec les tests reels
-   sur appareil/CI (Etape 6), en gardant a l'esprit qu'un correctif sera
-   necessaire si l'exec echoue sur Android 10+.
-
-Le code actuel suit la lettre de la demande (bootstrap + proot telecharges et
-extraits au premier lancement) ; le point ci-dessus est documente pour qu'on
-puisse decider ensemble plutot que de le corriger silencieusement.
-
-## Bind mounts et variables d'environnement
-
-`ProotShellSessionFactory.buildProotArgv` (teste unitairement) construit :
+`BootstrapShellSessionFactory.buildShellEnvironment` (teste unitairement)
+fixe donc :
 
 ```
-<prefixReel>/bin/proot
-  --link2symlink --kill-on-exit --sysvipc -0
-  -b /dev -b /proc
-  [-b <stockage-externe>:/sdcard]      si accessible
-  [-b /apex]                            si API >= 29 (resolution DNS)
-  -b <prefixReel>:/data/data/com.termux/files/usr
-  -b <homeReel>:/data/data/com.termux/files/home
-  -w /data/data/com.termux/files/home
-  /data/data/com.termux/files/usr/bin/bash --login
+HOME=<homeReel>
+PREFIX=<prefixReel>
+PATH=<prefixReel>/bin
+LD_LIBRARY_PATH=<prefixReel>/lib
+LANG=en_US.UTF-8
+TERM=xterm-256color
+COLORTERM=truecolor
+TMPDIR=<prefixReel>/tmp
 ```
 
-`buildShellEnvironment` fixe `HOME`, `PREFIX`, `PATH`, `LD_LIBRARY_PATH`,
-`LANG`, `TERM=xterm-256color`, `COLORTERM=truecolor`, `TMPDIR`, toutes
-pointant vers les chemins virtuels (coherent avec ce que les scripts du
-bootstrap - `profile.d`, `apt`, etc. - attendent).
+et la session est creee avec `shellPath = cwd = <prefixReel>/bin/bash`,
+`args = [bash, --login]`.
 
-Notez que `cwd` passe a `TerminalSession` est le dossier **reel** (`proot`
-ne remappe le chemin que pour le processus qu'il execute ensuite, pas pour le
-`chdir()` fait par notre propre code juste avant l'`exec` de `proot` lui-meme).
+### Limite connue : scripts avec shebang code en dur
+
+`LD_LIBRARY_PATH` resout le probleme pour les executables ELF (`bash`,
+`apt`, `dpkg`, coreutils...). Il reste possible que de rares scripts du
+bootstrap (scripts de maintenance dpkg, post/pre-install de certains
+paquets) commencent par un shebang litteral
+`#!/data/data/com.termux/files/usr/bin/bash` : le noyau resoudrait ce
+chemin pour de vrai et echouerait puisqu'il n'existe pas. Cela ne bloque
+pas l'usage courant du terminal (execution interactive de commandes,
+coreutils, edition de fichiers) ; a verifier et corriger au cas par cas une
+fois testable sur un vrai appareil/emulateur (Etape 6), par exemple en
+patchant le shebang de ces scripts specifiques lors de l'extraction si un
+cas concret se presente.
+
+## Restriction d'execution Android 10+ (W^X) - toujours d'actualite
+
+Cette contrainte ne depend pas de proot : depuis Android 10 (API 29), un
+fichier ecrit par l'app dans son propre dossier prive
+(`/data/data/<pkg>/files/...`) **ne peut generalement plus etre execute**
+(durcissement W^X). Elle s'applique donc de la meme facon a `bash` execute
+directement qu'elle se serait appliquee a `proot`. C'est la raison pour
+laquelle le vrai Termux a arrete de telecharger son bootstrap au premier
+lancement et l'embarque desormais **au moment du build** dans
+`app/src/main/jniLibs/<abi>/` (dossier natif de l'APK, exempte de cette
+restriction).
+
+Le code actuel suit la demande initiale (telechargement et extraction au
+premier lancement) et fonctionnera tel quel sur API 26-28. Sur API 29+, il
+est probable que le lancement de `bash` echoue tant que ce point n'est pas
+traite. Options pour plus tard (a rediscuter avant l'Etape 6, une fois qu'on
+peut tester sur un vrai appareil/emulateur) :
+
+1. Embarquer `bash` (et ses `.so`) dans `jniLibs` au moment du build, comme
+   le fait Termux - le plus robuste, mais s'ecarte du telechargement "au
+   premier lancement".
+2. Ne rien changer et constater l'echec reel (ou son absence - les
+   restrictions varient selon fabricant/version) lors des tests Etape 6,
+   puis corriger si necessaire.
 
 ## Permissions
 
-Ni `BootstrapInstaller` ni `ProotShellSessionFactory` ne necessitent de
+Ni `BootstrapInstaller` ni `BootstrapShellSessionFactory` ne necessitent de
 permission de stockage : tout se passe dans le stockage prive de l'app
-(`context.filesDir`), conformement a l'Etape 5 de la demande. Le bind mount
-optionnel `/sdcard` degrade proprement (simplement absent) si
-`Environment.getExternalStorageDirectory()` n'est pas accessible - aucune
-permission n'est demandee ici ; la gestion des permissions runtime et des
-symlinks `~/storage/*` (acces au stockage partage) est prevue pour l'Etape 5.
+(`context.filesDir`), conformement a l'Etape 5 de la demande. La gestion
+des permissions runtime et des symlinks `~/storage/*` (acces au stockage
+partage) est prevue pour l'Etape 5.
 
 ## Tests
 
-`shell/src/test` contient des tests JUnit purs (pas de dependance Android,
-`BootstrapArch`, `buildProotArgv`, `buildShellEnvironment` sont des fonctions
-pures) :
+`shell/src/test` contient des tests JUnit purs (pas de dependance Android) :
 
 ```
 ./gradlew :shell:testDebugUnitTest
 ```
 
-Comme pour l'Etape 1, je n'ai pas pu executer cette commande dans ce bac a
-sable (meme limitation reseau que documentee dans
-`docs/step-1-terminal-engine.md`) ; le workflow CI GitHub Actions
-(`.github/workflows/build.yml`) a ete mis a jour pour compiler et tester ce
-nouveau module a chaque push.
+Comme pour l'Etape 1, je n'ai pas pu executer les commandes Gradle Android
+dans ce bac a sable (meme limitation reseau que documentee dans
+`docs/step-1-terminal-engine.md`, `dl.google.com`/`maven.google.com` restent
+bloques) ; le workflow CI GitHub Actions (`.github/workflows/build.yml`)
+compile et teste ce module a chaque push. En revanche, `github.com` (releases
+incluses) est accessible depuis ce bac a sable, ce qui a permis de verifier
+empiriquement le contenu reel du bootstrap (section ci-dessus) plutot que de
+se fier uniquement a la lecture du code source de termux-packages.
 
 ## Pas encore fait (etapes suivantes)
 
@@ -149,4 +157,5 @@ nouveau module a chaque push.
   demande des permissions de stockage necessaires (Etape 3 / Etape 5).
 - Symlinks `~/storage/*` vers le stockage partage (Etape 5).
 - Foreground service gardant la session active en arriere-plan (Etape 5).
-- Decision sur le vendoring de `proot` en `jniLibs` (voir plus haut).
+- Decision sur l'embarquement de `bash`/`jniLibs` pour Android 10+ (voir
+  plus haut), a prendre avant de considerer l'Etape 6 terminee.

@@ -32,7 +32,7 @@ sealed interface BootstrapProgress {
  * releases) into this app's private storage, independently of [com.termux.terminal.TerminalSession]
  * so that reinstalling/updating the bootstrap later does not touch session/UI code.
  *
- * Kept separate from [ProotShellSessionFactory]: this class only ever produces a directory tree
+ * Kept separate from [BootstrapShellSessionFactory]: this class only ever produces a directory tree
  * under [TermaterialPaths.realPrefixDir]; it has no opinion on how that tree is later executed.
  */
 class BootstrapInstaller(private val context: Context) {
