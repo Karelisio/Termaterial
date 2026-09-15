@@ -139,8 +139,12 @@ private fun TermaterialApp(
     // bootstrap's bash cannot be executed on this device - see docs/step-2-shell-backend.md's
     // Android 10+ caveat): shown via BootstrapProgressScreen's existing Failed state below, so
     // the actual error is visible on-screen instead of only in a logcat the user may not have
-    // access to.
-    var sessionError by remember { mutableStateOf<String?>(null) }
+    // access to. Also seeded from any crash CrashReporter recorded on a *previous* launch (for
+    // crashes that happen inside an Android framework callback, e.g. TerminalView's layout pass,
+    // which this composable cannot wrap in a try/catch of its own).
+    var sessionError by remember {
+        mutableStateOf(CrashReporter.consumeLastCrash(context)?.let { "Crash au lancement précédent :\n\n$it" })
+    }
     var sessionRetryAttempt by remember { mutableIntStateOf(0) }
 
     fun openNewTab() {
