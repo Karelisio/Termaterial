@@ -16,6 +16,20 @@ android {
         versionName = "0.1.0"
     }
 
+    signingConfigs {
+        getByName("debug") {
+            // A stable, checked-in debug key (debug keys are meant to be shared, unlike release
+            // keys) so every CI build is signed identically and installs as an update over the
+            // previous one. Without this, AGP falls back to auto-generating ~/.android/debug.keystore
+            // on whichever machine builds it - a fresh, different key on every ephemeral CI runner,
+            // forcing an uninstall before every single update.
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false

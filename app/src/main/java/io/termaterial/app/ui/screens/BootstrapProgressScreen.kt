@@ -4,8 +4,12 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
@@ -15,6 +19,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import io.termaterial.app.R
 import io.termaterial.shell.BootstrapProgress
@@ -27,7 +32,10 @@ fun BootstrapProgressScreen(
     modifier: Modifier = Modifier,
 ) {
     Column(
-        modifier = modifier.fillMaxSize().padding(PaddingValues(24.dp)),
+        modifier = modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(PaddingValues(24.dp)),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
@@ -89,11 +97,18 @@ fun BootstrapProgressScreen(
                         style = MaterialTheme.typography.titleLarge,
                         color = MaterialTheme.colorScheme.error,
                     )
-                    Text(
-                        text = progress.message,
-                        modifier = Modifier.padding(top = 8.dp),
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
+                    // Selectable + monospace: this can be a full stack trace (see MainActivity's
+                    // session-creation error handling), and the user needs to be able to copy it
+                    // out to report it, not just read it.
+                    SelectionContainer {
+                        Text(
+                            text = progress.message,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 8.dp),
+                            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                        )
+                    }
                     Button(onClick = onRetry, modifier = Modifier.padding(top = 16.dp)) {
                         Text(stringResource(id = R.string.bootstrap_retry))
                     }

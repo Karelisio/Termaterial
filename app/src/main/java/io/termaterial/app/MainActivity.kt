@@ -135,31 +135,43 @@ private fun TermaterialApp(
     val tabs = remember { mutableStateListOf<TerminalTab>() }
     var activeTabId by remember { mutableStateOf<String?>(null) }
 
+    // Surfaced instead of letting an exception here crash the app outright (e.g. if the
+    // bootstrap's bash cannot be executed on this device - see docs/step-2-shell-backend.md's
+    // Android 10+ caveat): shown via BootstrapProgressScreen's existing Failed state below, so
+    // the actual error is visible on-screen instead of only in a logcat the user may not have
+    // access to.
+    var sessionError by remember { mutableStateOf<String?>(null) }
+    var sessionRetryAttempt by remember { mutableIntStateOf(0) }
+
     fun openNewTab() {
-        val id = UUID.randomUUID().toString()
-        val title = mutableStateOf<String?>(null)
-        val client = AppTerminalClient(
-            context = context,
-            extraKeysState = extraKeysState,
-            onTitleChanged = { title.value = it },
-            onSessionFinished = {
-                val wasActive = activeTabId == id
-                tabs.removeAll { it.id == id }
-                if (wasActive) {
-                    activeTabId = tabs.lastOrNull()?.id
-                }
-            },
-        )
-        val session = BootstrapShellSessionFactory().createSession(context, client)
-        tabs.add(TerminalTab(id, session, client, title))
-        activeTabId = id
+        try {
+            val id = UUID.randomUUID().toString()
+            val title = mutableStateOf<String?>(null)
+            val client = AppTerminalClient(
+                context = context,
+                extraKeysState = extraKeysState,
+                onTitleChanged = { title.value = it },
+                onSessionFinished = {
+                    val wasActive = activeTabId == id
+                    tabs.removeAll { it.id == id }
+                    if (wasActive) {
+                        activeTabId = tabs.lastOrNull()?.id
+                    }
+                },
+            )
+            val session = BootstrapShellSessionFactory().createSession(context, client)
+            tabs.add(TerminalTab(id, session, client, title))
+            activeTabId = id
+        } catch (e: Exception) {
+            sessionError = "${e.javaClass.simpleName}: ${e.message}\n\n${e.stackTraceToString()}"
+        }
     }
 
     val isInstalled = progress is BootstrapProgress.Installed
     // Also re-runs whenever tabs.size changes back to 0 (every tab closed, or a shell exited),
     // opening a fresh one rather than leaving the user stranded on no screen at all.
-    LaunchedEffect(isInstalled, tabs.size) {
-        if (isInstalled && tabs.isEmpty()) {
+    LaunchedEffect(isInstalled, tabs.size, sessionRetryAttempt) {
+        if (isInstalled && tabs.isEmpty() && sessionError == null) {
             // Prime the (process-wide) terminal color scheme with the persisted palette before
             // the first session's emulator is created, so it renders with the right colors from
             // the start instead of flashing the xterm defaults. A no-op on later re-opens.
@@ -177,8 +189,17 @@ private fun TermaterialApp(
         service.value?.updateStatus(sessionCount = tabs.size, activeTitle = activeTabTitle)
     }
 
+    val currentSessionError = sessionError
     val currentActiveId = activeTabId
-    if (currentActiveId != null && tabs.isNotEmpty()) {
+    if (currentSessionError != null) {
+        BootstrapProgressScreen(
+            progress = BootstrapProgress.Failed(currentSessionError),
+            onRetry = {
+                sessionError = null
+                sessionRetryAttempt++
+            },
+        )
+    } else if (currentActiveId != null && tabs.isNotEmpty()) {
         TerminalScreen(
             tabs = tabs,
             activeTabId = currentActiveId,
