@@ -26,7 +26,12 @@ Le projet est construit étape par étape :
       [`docs/step-2-shell-backend.md`](docs/step-2-shell-backend.md) — inclut
       un point d'attention important sur Android 10+ à trancher avant
       l'Étape 6.
-- [ ] Étape 3 — UI Compose Material You
+- [x] **Étape 3 — UI Compose Material You** : module `app`, thème
+      `TermaterialTheme` (dynamic color API 31+, palette terminal
+      vert/ambre en fallback), `TerminalScreen` (TopAppBar + `TerminalView`
+      via `AndroidView`), `BootstrapProgressScreen`, `SettingsBottomSheet`
+      (placeholder). Voir
+      [`docs/step-3-ui-compose.md`](docs/step-3-ui-compose.md).
 - [ ] Étape 4 — Fonctionnalités (onglets, réglages, barre de touches)
 - [ ] Étape 5 — Permissions Android & foreground service
 - [ ] Étape 6 — Build & vérification APK debug
@@ -37,6 +42,7 @@ Le projet est construit étape par étape :
 terminal-emulator/   Moteur d'émulation ANSI/VT100 (module Android library, Java)
 terminal-view/       Vue de rendu du terminal (module Android library, Java)
 shell/               Bootstrap Termux + lancement direct du shell (module Android library, Kotlin)
+app/                 Application Compose / Material You (module Android application, Kotlin)
 ```
 
 ## Licences

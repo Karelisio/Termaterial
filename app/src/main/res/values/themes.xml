@@ -1,0 +1,12 @@
+<resources>
+    <!--
+      Minimal platform (non-Compose) theme, only used for the window background before Compose's
+      own MaterialTheme (see ui/theme/Theme.kt) takes over inside setContent. No AppCompat/Material
+      Components XML dependency is needed since the whole UI is Compose.
+    -->
+    <style name="Theme.Termaterial" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/window_background</item>
+        <item name="android:statusBarColor">@color/window_background</item>
+        <item name="android:navigationBarColor">@color/window_background</item>
+    </style>
+</resources>

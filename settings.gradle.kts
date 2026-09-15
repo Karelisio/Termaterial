@@ -19,3 +19,4 @@ rootProject.name = "Termaterial"
 include(":terminal-emulator")
 include(":terminal-view")
 include(":shell")
+include(":app")
