@@ -7,4 +7,14 @@
     <string name="bootstrap_extracting">Extraction des fichiers…</string>
     <string name="bootstrap_failed_title">Échec de l\'installation</string>
     <string name="bootstrap_retry">Réessayer</string>
+
+    <string name="settings_font">Police monospace</string>
+    <string name="settings_font_size">Taille du texte (%1$d sp)</string>
+    <string name="settings_terminal_theme">Thème de couleurs du terminal</string>
+    <string name="settings_dynamic_color">Dynamic color</string>
+    <string name="settings_dynamic_color_description">Couleurs dérivées du fond d\'écran (Android 12+)</string>
+    <string name="settings_dynamic_color_unavailable">Nécessite Android 12 ou supérieur</string>
+
+    <string name="tab_new">Nouvel onglet</string>
+    <string name="tab_close">Fermer l\'onglet</string>
 </resources>

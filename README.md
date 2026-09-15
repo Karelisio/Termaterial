@@ -32,7 +32,12 @@ Le projet est construit étape par étape :
       via `AndroidView`), `BootstrapProgressScreen`, `SettingsBottomSheet`
       (placeholder). Voir
       [`docs/step-3-ui-compose.md`](docs/step-3-ui-compose.md).
-- [ ] Étape 4 — Fonctionnalités (onglets, réglages, barre de touches)
+- [x] **Étape 4 — Fonctionnalités** : onglets multi-sessions (une
+      `TerminalView` partagée, `attachSession` pour changer d'onglet),
+      écran de réglages complet (police, taille, thème de couleurs
+      terminal réel via `TerminalColorSchemeApplier`, dynamic color
+      on/off), barre de touches spéciales (Ctrl/Alt en bascule, Tab, Esc,
+      flèches). Voir [`docs/step-4-features.md`](docs/step-4-features.md).
 - [ ] Étape 5 — Permissions Android & foreground service
 - [ ] Étape 6 — Build & vérification APK debug
 

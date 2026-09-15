@@ -12,15 +12,12 @@ import com.termux.view.TerminalView
 import com.termux.view.TerminalViewClient
 
 /**
- * Minimal [TerminalSessionClient] + [TerminalViewClient] implementation wiring a [TerminalSession]
- * to a [TerminalView] and to simple Compose-facing callbacks.
- *
- * Extra-keys row handling ([readControlKey] etc.) always reports "not pressed" for now - Step 4
- * ("Gestion du clavier : barre de touches spéciales") will back these with real UI state instead
- * of hardcoded `false`.
+ * [TerminalSessionClient] + [TerminalViewClient] implementation wiring a [TerminalSession] to a
+ * [TerminalView] and to simple Compose-facing callbacks.
  */
 class AppTerminalClient(
     private val context: Context,
+    private val extraKeysState: ExtraKeysState,
     private val onTitleChanged: (String?) -> Unit,
     private val onSessionFinished: () -> Unit,
 ) : TerminalSessionClient, TerminalViewClient {
@@ -132,9 +129,9 @@ class AppTerminalClient(
 
     override fun onLongPress(event: MotionEvent): Boolean = false
 
-    override fun readControlKey(): Boolean = false
+    override fun readControlKey(): Boolean = extraKeysState.controlActive
 
-    override fun readAltKey(): Boolean = false
+    override fun readAltKey(): Boolean = extraKeysState.altActive
 
     override fun readShiftKey(): Boolean = false
 
