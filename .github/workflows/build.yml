@@ -102,14 +102,17 @@ jobs:
           set -euo pipefail
           TAG="debug-$(echo "${{ github.ref_name }}" | tr '/' '-')"
           NOTES="APK debug généré automatiquement par la CI à chaque push réussi sur \`${{ github.ref_name }}\`. Commit : ${{ github.sha }}."
+          # Not --prerelease: Obtainium (and GitHub's own /releases/latest) resolve "latest
+          # release" by excluding prereleases, so a prerelease here is invisible to update
+          # checkers that just follow "latest" - this is still clearly a debug build via the
+          # tag/title, not a claim of stability.
           if gh release view "$TAG" > /dev/null 2>&1; then
             gh release upload "$TAG" app/build/outputs/apk/debug/*.apk --clobber
-            gh release edit "$TAG" --notes "$NOTES"
+            gh release edit "$TAG" --notes "$NOTES" --prerelease=false
           else
             gh release create "$TAG" app/build/outputs/apk/debug/*.apk \
               --title "Termaterial debug ($TAG)" \
-              --notes "$NOTES" \
-              --prerelease
+              --notes "$NOTES"
           fi
 
       - name: Upload test reports
