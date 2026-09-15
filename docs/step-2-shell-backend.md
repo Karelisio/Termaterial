@@ -101,30 +101,43 @@ fois testable sur un vrai appareil/emulateur (Etape 6), par exemple en
 patchant le shebang de ces scripts specifiques lors de l'extraction si un
 cas concret se presente.
 
-## Restriction d'execution Android 10+ (W^X) - toujours d'actualite
+## Restriction d'execution Android 10+ (W^X) - confirmee, puis contournee
 
-Cette contrainte ne depend pas de proot : depuis Android 10 (API 29), un
-fichier ecrit par l'app dans son propre dossier prive
-(`/data/data/<pkg>/files/...`) **ne peut generalement plus etre execute**
-(durcissement W^X). Elle s'applique donc de la meme facon a `bash` execute
-directement qu'elle se serait appliquee a `proot`. C'est la raison pour
-laquelle le vrai Termux a arrete de telecharger son bootstrap au premier
-lancement et l'embarque desormais **au moment du build** dans
-`app/src/main/jniLibs/<abi>/` (dossier natif de l'APK, exempte de cette
-restriction).
+Confirme sur un vrai appareil (Etape 6) : `exec("/data/user/0/io.termaterial.app/files/usr/bin/bash"): Permission denied`,
+exactement la restriction anticipee ici. Cette contrainte ne depend pas de
+proot : depuis Android 10 (API 29), un fichier ecrit par l'app dans son
+propre dossier prive (`/data/data/<pkg>/files/...`) ne peut generalement
+plus etre execute (durcissement W^X). Elle s'applique de la meme facon a
+`bash` execute directement qu'elle se serait appliquee a `proot`.
 
-Le code actuel suit la demande initiale (telechargement et extraction au
-premier lancement) et fonctionnera tel quel sur API 26-28. Sur API 29+, il
-est probable que le lancement de `bash` echoue tant que ce point n'est pas
-traite. Options pour plus tard (a rediscuter avant l'Etape 6, une fois qu'on
-peut tester sur un vrai appareil/emulateur) :
+**Contournement retenu** : cette restriction n'est pas liee a la version
+d'Android de l'appareil, mais au `targetSdkVersion` **declare par l'app**
+(changement de comportement documente par Google comme s'appliquant "aux
+apps ciblant l'API 29+"). `app/build.gradle.kts` fixe donc volontairement
+`targetSdk = 28` (au lieu des 35 partages par les autres modules via
+`gradle.properties`) : l'app garde le comportement historique (autorisee a
+executer les fichiers qu'elle a elle-meme extraits) meme sur un appareil
+recent. Verifie efficace sur le meme appareil qui reproduisait l'erreur.
 
-1. Embarquer `bash` (et ses `.so`) dans `jniLibs` au moment du build, comme
-   le fait Termux - le plus robuste, mais s'ecarte du telechargement "au
-   premier lancement".
-2. Ne rien changer et constater l'echec reel (ou son absence - les
-   restrictions varient selon fabricant/version) lors des tests Etape 6,
-   puis corriger si necessaire.
+Limites de ce choix, assumees pour une app sideloadee (pas de publication
+Play Store envisagee, qui imposerait de toute facon un `targetSdk` bien
+plus recent) :
+- Perd certains comportements/protections par defaut lies aux
+  `targetSdk` recents (globalement dans le sens "plus permissif", ce qui
+  ne pose pas de probleme ici).
+- Si un jour un `targetSdk` recent redevient necessaire (publication,
+  exigence d'une lib tierce...), il faudra alors la solution plus lourde :
+  embarquer `bash` (et ses `.so`) - voire `proot` - dans
+  `app/src/main/jniLibs/<abi>/` au moment du build, comme le fait le vrai
+  Termux aujourd'hui. Explore et abandonnee pour l'instant : ni le
+  bootstrap zip officiel ni le depot `termux/proot` ne publient de binaire
+  precompile telechargeable depuis les canaux accessibles (le CDN de
+  paquets Termux est bloque depuis le bac a sable de dev, et `termux/proot`
+  n'a pas de pipeline de release GitHub - seul `termux-packages`, egalement
+  bloque, le compile) ; construire `proot` depuis les sources (avec sa
+  dependance `libtalloc` et son composant `loader`) est un chantier de
+  compilation croisee NDK consequent, a envisager seulement si le
+  contournement `targetSdk` s'avere insuffisant.
 
 ## Permissions
 

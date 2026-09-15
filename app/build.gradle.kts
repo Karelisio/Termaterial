@@ -11,7 +11,17 @@ android {
     defaultConfig {
         applicationId = "io.termaterial.app"
         minSdk = (property("minSdkVersion") as String).toInt()
-        targetSdk = (property("targetSdkVersion") as String).toInt()
+        // Deliberately NOT the shared gradle.properties targetSdkVersion (35): the bootstrap's
+        // bash is downloaded and extracted into the app's private data directory at runtime and
+        // exec'd directly (see docs/step-2-shell-backend.md). Android's W^X exec-from-app-data-dir
+        // restriction only applies to apps *targeting* API 29+ - it is gated on the app's own
+        // targetSdkVersion, not the device's Android version - so an app targeting < 29 keeps the
+        // legacy behavior (allowed to exec files it wrote) even when running on Android 10+.
+        // Confirmed on a real device: exec("...bash"): Permission denied at targetSdk 35, which
+        // this works around. Not eligible for Play Store (which requires a much newer target),
+        // irrelevant for a sideloaded app. See docs/step-2-shell-backend.md for the alternative
+        // (vendor bash/proot into jniLibs at build time) if a higher targetSdk becomes necessary.
+        targetSdk = 28
         versionCode = 1
         versionName = "0.1.0"
     }
