@@ -1,5 +1,7 @@
 # Termaterial
 
+![Build](https://github.com/Karelisio/Termaterial/actions/workflows/build.yml/badge.svg)
+
 Terminal Android natif inspiré de [Termux](https://github.com/termux/termux-app),
 avec une interface Material You (Material 3, dynamic color) au lieu de
 l'interface classique de Termux.
@@ -43,7 +45,12 @@ Le projet est construit étape par étape :
       refusée), `TerminalSessionService` (foreground, type `specialUse`,
       notification persistante) démarré dès qu'un onglet existe. Voir
       [`docs/step-5-permissions.md`](docs/step-5-permissions.md).
-- [ ] Étape 6 — Build & vérification APK debug
+- [x] **Étape 6 — Build & vérification** : la CI compile les 4 modules et
+      produit un APK debug (`terminal-emulator`, `terminal-view`, `shell`,
+      `app`) à chaque push — voir le badge ci-dessus. Reste un point ouvert
+      avant de considérer le projet totalement terminé : le comportement
+      réel sur Android 10+ (voir `docs/step-2-shell-backend.md`), qui ne
+      peut être vérifié que sur un appareil/émulateur réel.
 
 ## Structure
 
