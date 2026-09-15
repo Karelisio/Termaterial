@@ -18,7 +18,12 @@ Le projet est construit étape par étape :
       [termux/termux-app](https://github.com/termux/termux-app) pour
       compiler comme modules Gradle indépendants. Voir
       [`docs/step-1-terminal-engine.md`](docs/step-1-terminal-engine.md).
-- [ ] Étape 2 — Shell backend (bootstrap + proot)
+- [x] **Étape 2 — Shell backend** : module `shell` (`BootstrapInstaller`,
+      `ProotShellSessionFactory`) qui télécharge le bootstrap Termux officiel
+      et lance `bash` via `proot` (bind-mount des chemins virtuels
+      `/data/data/com.termux/...` vers le stockage privé réel de l'app). Voir
+      [`docs/step-2-shell-backend.md`](docs/step-2-shell-backend.md) — inclut
+      un point d'attention important sur Android 10+ à trancher ensemble.
 - [ ] Étape 3 — UI Compose Material You
 - [ ] Étape 4 — Fonctionnalités (onglets, réglages, barre de touches)
 - [ ] Étape 5 — Permissions Android & foreground service
@@ -29,6 +34,7 @@ Le projet est construit étape par étape :
 ```
 terminal-emulator/   Moteur d'émulation ANSI/VT100 (module Android library, Java)
 terminal-view/       Vue de rendu du terminal (module Android library, Java)
+shell/               Bootstrap Termux + lancement du shell via proot (module Android library, Kotlin)
 ```
 
 ## Licences

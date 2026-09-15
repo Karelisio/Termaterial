@@ -32,11 +32,11 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Build terminal-emulator and terminal-view
-        run: ./gradlew :terminal-emulator:assembleDebug :terminal-view:assembleDebug --stacktrace
+      - name: Build terminal-emulator, terminal-view and shell
+        run: ./gradlew :terminal-emulator:assembleDebug :terminal-view:assembleDebug :shell:assembleDebug --stacktrace
 
-      - name: Run terminal-emulator unit tests
-        run: ./gradlew :terminal-emulator:testDebugUnitTest --stacktrace
+      - name: Run unit tests
+        run: ./gradlew :terminal-emulator:testDebugUnitTest :shell:testDebugUnitTest --stacktrace
 
       - name: Build app (debug APK)
         if: hashFiles('app/build.gradle.kts') != ''
