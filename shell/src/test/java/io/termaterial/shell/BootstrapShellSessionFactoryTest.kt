@@ -1,6 +1,7 @@
 package io.termaterial.shell
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
@@ -39,5 +40,32 @@ class BootstrapShellSessionFactoryTest {
             )
         )
         assertEquals("screen-256color", env["TERM"])
+    }
+
+    @Test
+    fun `APT_CONFIG and DPKG_ADMINDIR point at the apt override and the real dpkg admindir`() {
+        val env = envMap(BootstrapShellSessionFactory.buildShellEnvironment(realPrefixDir, realHomeDir))
+        assertEquals(
+            BootstrapShellSessionFactory.aptConfigFile(realPrefixDir).absolutePath,
+            env["APT_CONFIG"],
+        )
+        assertEquals("${realPrefixDir.absolutePath}/var/lib/dpkg", env["DPKG_ADMINDIR"])
+    }
+
+    @Test
+    fun `apt config override file sits next to, not inside, the real prefix`() {
+        assertEquals(
+            File(realPrefixDir.parentFile, "termaterial-apt.conf"),
+            BootstrapShellSessionFactory.aptConfigFile(realPrefixDir),
+        )
+    }
+
+    @Test
+    fun `apt config override redirects Dir and every Dir:: key apt would otherwise resolve wrong`() {
+        val conf = BootstrapShellSessionFactory.buildAptConfigOverride(realPrefixDir)
+        assertTrue(conf.contains("Dir \"${realPrefixDir.absolutePath}/\";"))
+        assertTrue(conf.contains("Dir::State::status \"var/lib/dpkg/status\";"))
+        assertTrue(conf.contains("Dir::Bin::methods \"${realPrefixDir.absolutePath}/lib/apt/methods\";"))
+        assertTrue(conf.contains("Dir::Bin::dpkg \"${realPrefixDir.absolutePath}/bin/dpkg\";"))
     }
 }

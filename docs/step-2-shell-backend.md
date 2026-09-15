@@ -162,6 +162,42 @@ un prompt `bash-5.3$` apparait. Deux points restants observes a ce moment-la :
   `TerminalScreen.kt` l'appelle aussi une fois au premier affichage du
   terminal pour eviter d'avoir a taper l'ecran manuellement.
 
+Une fois le clavier fonctionnel, `apt update` echouait a son tour, meme
+cause de fond (chemin `/data/data/com.termux/files/usr/...` fige a la
+compilation) mais sur `apt` cette fois, confirme sur appareil reel :
+
+```
+W: Unable to read /data/data/com.termux/files/usr/etc/apt/apt.conf.d/ -
+   DirectoryExists (13: Permission denied)
+E: Unable to determine a suitable packaging system type
+```
+
+`apt`/`dpkg` du bootstrap ont eux aussi `/data/data/com.termux/files/usr`
+fige en dur comme racine de configuration (`Dir::Etc`, `Dir::State::status`,
+`Dir::Bin::methods`...), inaccessible pour la meme raison que `/etc/profile`
+plus haut. Contrairement a `bash`, il n'y a pas de flag `--noprofile`
+equivalent pour desactiver cette lecture : la solution retenue est la
+technique standard des outils de chroot (`schroot`, `sbuild`, `mmdebstrap`)
+pour reorienter `apt` vers une autre racine a l'execution - un fichier de
+config passe via la variable d'environnement `APT_CONFIG` (lue par `apt`
+avant qu'il ne tente de resoudre son propre `Dir::Etc` par defaut, donc lu
+meme si la racine par defaut est inaccessible) qui redefinit `Dir` et
+chaque cle `Dir::*` non deduite automatiquement de `Dir`.
+
+`BootstrapShellSessionFactory.buildAptConfigOverride` (pure, testee
+unitairement) genere ce fichier, reecrit a chaque nouvelle session dans
+`<filesDir>/termaterial-apt.conf` (`aptConfigFile`, hors de `usr/` pour
+survivre a une reinstallation du bootstrap) ; `APT_CONFIG` dans
+`buildShellEnvironment` pointe dessus. `DPKG_ADMINDIR` (l'equivalent de
+`--admindir` pour `dpkg` en variable d'environnement) est aussi positionne,
+pour les invocations directes de `dpkg` qui ne passent pas par `apt`.
+
+**Non confirme sur appareil reel** au moment d'ecrire ceci (contrairement
+aux autres points de cette section) : la technique `APT_CONFIG`/`Dir` est
+bien documentee et utilisee par des outils de chroot Debian existants, mais
+n'a pas encore ete testee avec ce bootstrap precis - a verifier au prochain
+test de `apt update`/`apt install`.
+
 ## Permissions
 
 Ni `BootstrapInstaller` ni `BootstrapShellSessionFactory` ne necessitent de
