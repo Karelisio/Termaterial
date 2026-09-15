@@ -180,9 +180,15 @@ class BootstrapInstaller(private val context: Context) {
             var entry: ZipEntry? = zipInput.nextEntry
             while (entry != null) {
                 if (entry.name == "SYMLINKS.txt") {
-                    BufferedReader(InputStreamReader(zipInput, Charsets.UTF_8)).forEachLine { line ->
-                        val parts = line.split(SYMLINK_SEPARATOR)
-                        if (parts.size != 2) throw IOException("Malformed symlink line: $line")
+                    // Not Reader.forEachLine(): it calls use{} internally and would close zipInput
+                    // (via InputStreamReader -> BufferedReader delegation) as soon as this entry's
+                    // data ends, breaking every zip entry read afterwards ("Stream closed").
+                    val symlinksReader = BufferedReader(InputStreamReader(zipInput, Charsets.UTF_8))
+                    var line: String?
+                    while (symlinksReader.readLine().also { line = it } != null) {
+                        val currentLine = line!!
+                        val parts = currentLine.split(SYMLINK_SEPARATOR)
+                        if (parts.size != 2) throw IOException("Malformed symlink line: $currentLine")
                         val (linkTarget, relativeLinkPath) = parts
                         val linkPath = File(stagingDir, relativeLinkPath)
                         linkPath.parentFile?.mkdirs()
