@@ -61,7 +61,7 @@ class BootstrapShellSessionFactoryTest {
     }
 
     @Test
-    fun `apt config override redirects Dir and every Dir:: key apt would otherwise resolve wrong`() {
+    fun `apt config override redirects Dir and every Dir-prefixed key apt would otherwise resolve wrong`() {
         val conf = BootstrapShellSessionFactory.buildAptConfigOverride(realPrefixDir)
         assertTrue(conf.contains("Dir \"${realPrefixDir.absolutePath}/\";"))
         assertTrue(conf.contains("Dir::State::status \"var/lib/dpkg/status\";"))
