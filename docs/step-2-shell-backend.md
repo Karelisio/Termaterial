@@ -192,11 +192,30 @@ survivre a une reinstallation du bootstrap) ; `APT_CONFIG` dans
 `--admindir` pour `dpkg` en variable d'environnement) est aussi positionne,
 pour les invocations directes de `dpkg` qui ne passent pas par `apt`.
 
-**Non confirme sur appareil reel** au moment d'ecrire ceci (contrairement
-aux autres points de cette section) : la technique `APT_CONFIG`/`Dir` est
-bien documentee et utilisee par des outils de chroot Debian existants, mais
-n'a pas encore ete testee avec ce bootstrap precis - a verifier au prochain
-test de `apt update`/`apt install`.
+**Confirme partiellement sur appareil reel** : la technique `APT_CONFIG`/`Dir`
+fonctionne - `apt update` lit desormais sa config et contacte bien
+`packages-cf.termux.dev` (fini le "Permission denied" et le "Unable to
+determine a suitable packaging system type"). Mais un probleme du meme type
+est apparu juste apres, plus loin dans la meme requete :
+
+```
+Err:1 https://packages-cf.termux.dev/apt/termux-main stable InRelease
+  Certificate verification failed: The certificate is NOT trusted. The
+  certificate issuer is unknown. Could not handshake: Error in the
+  certificate verification.
+W: https://.../InRelease: No system certificates available. Try installing
+   ca-certificates.
+```
+
+Meme cause de fond, un niveau plus bas : `Dir` corrige la racine de config,
+mais `Acquire::https::CaInfo` (chemin du magasin de certificats CA utilise
+par la methode `https` d'apt) a lui aussi `/data/data/com.termux/files/usr`
+fige en dur, vers `$PREFIX/etc/tls/cert.pem` - un fichier que le bootstrap
+fournit reellement (`ca-certificates` est une dependance d'`apt`, incluse
+de fait dans le bootstrap), mais a un chemin inaccessible pour Termaterial.
+`buildAptConfigOverride` ajoute donc `Acquire::https::CaInfo` pointant vers
+le vrai `$PREFIX/etc/tls/cert.pem`. **Pas encore reteste sur appareil reel**
+apres cet ajout - a confirmer au prochain `apt update`.
 
 ## Permissions
 

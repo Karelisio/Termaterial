@@ -67,5 +67,6 @@ class BootstrapShellSessionFactoryTest {
         assertTrue(conf.contains("Dir::State::status \"var/lib/dpkg/status\";"))
         assertTrue(conf.contains("Dir::Bin::methods \"${realPrefixDir.absolutePath}/lib/apt/methods\";"))
         assertTrue(conf.contains("Dir::Bin::dpkg \"${realPrefixDir.absolutePath}/bin/dpkg\";"))
+        assertTrue(conf.contains("Acquire::https::CaInfo \"${realPrefixDir.absolutePath}/etc/tls/cert.pem\";"))
     }
 }

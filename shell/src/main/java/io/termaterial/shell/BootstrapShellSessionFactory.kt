@@ -115,6 +115,13 @@ class BootstrapShellSessionFactory {
          * `APT_CONFIG` environment variable (read before apt resolves its own default config
          * location, unlike a file placed inside the - wrong - default `Dir::Etc`), that sets the
          * top-level `Dir` and every `Dir::*` key apt does not resolve relative to it by default.
+         *
+         * `Acquire::https::CaInfo` is the same problem again, one level down: with `Dir` fixed,
+         * `apt update` could reach packages-cf.termux.dev but then failed TLS verification
+         * ("No system certificates available", confirmed on a real device) because apt's https
+         * method also has a compiled-in, com.termux-only default CA bundle path
+         * (`$PREFIX/etc/tls/cert.pem`, shipped by the bootstrap itself as an apt dependency, not
+         * something Acquire::https::CaInfo's `Dir::*`-style relative resolution covers).
          */
         internal fun buildAptConfigOverride(realPrefixDir: File): String {
             val prefix = realPrefixDir.absolutePath
@@ -137,6 +144,7 @@ class BootstrapShellSessionFactory {
                 |Dir::Bin::methods "$prefix/lib/apt/methods";
                 |Dir::Bin::dpkg "$prefix/bin/dpkg";
                 |Dir::Log "var/log/apt";
+                |Acquire::https::CaInfo "$prefix/etc/tls/cert.pem";
                 |
             """.trimMargin()
         }
