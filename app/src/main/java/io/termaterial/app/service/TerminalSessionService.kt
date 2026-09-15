@@ -24,7 +24,7 @@ import io.termaterial.app.R
  * Termux" per the task spec.
  *
  * Deliberately does not own the sessions itself (they stay in `MainActivity`'s Compose state, as
- * built in Steps 3-4): a persistent foreground notification only needs the *count*/title to
+ * built in Steps 3-4): a persistent foreground notification only needs the count and title to
  * display, not the sessions themselves, and duplicating session ownership here would be a bigger
  * architectural change for no real benefit at this scope. See docs/step-5-permissions.md.
  */
