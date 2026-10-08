@@ -80,11 +80,7 @@ jobs:
       # that shells can run in proot mode - see scripts/fetch-proot.sh and
       # BootstrapShellSessionFactory. Without it the app still works, in direct mode only.
       - name: Stage Termux proot in the APK
-        run: |
-          set -euo pipefail
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends patchelf > /dev/null
-          PROOT_MANIFEST=proot-packages.txt scripts/fetch-proot.sh app/src/main/jniLibs
+        run: PROOT_MANIFEST=proot-packages.txt scripts/fetch-proot.sh app/src/main/jniLibs
 
       - name: Build all modules (debug)
         run: ./gradlew assembleDebug --stacktrace

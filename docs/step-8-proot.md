@@ -55,9 +55,13 @@ du depot, et les place dans `app/src/main/jniLibs/<abi>/` :
 
 Android extrait ces fichiers dans le dossier des bibliotheques natives de
 l'app (`useLegacyPackaging = true`), le seul endroit d'ou une app peut
-toujours executer un fichier. Seuls les en-tetes ELF sont modifies
-(`patchelf`) : `DT_RUNPATH` -> `$ORIGIN` et `libtalloc.so.2` ->
-`libtalloc.so` (Android n'extrait que des fichiers `lib*.so`). proot
+toujours executer un fichier. Seules quelques chaines de la section
+dynamique sont modifiees, sur place (`scripts/patch-elf-strings.py`, rien ne
+bouge dans les fichiers) : `DT_RUNPATH` de proot -> `$ORIGIN` et
+`libtalloc.so.2` -> `libtalloc.so` (Android n'extrait que des fichiers
+`lib*.so`). Une premiere version utilisait `patchelf`, qui a deplace
+`.dynstr` dans un nouveau segment `LOAD` en fin de fichier - le genre de
+reorganisation sur laquelle le linker d'Android est pointilleux. proot
 cherche normalement son loader et son dossier temporaire sous le `$PREFIX`
 de Termux : `PROOT_LOADER`, `PROOT_LOADER_32` et `PROOT_TMP_DIR` lui donnent
 les vrais chemins.

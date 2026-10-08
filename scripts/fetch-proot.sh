@@ -9,17 +9,19 @@
 #   libtalloc.so          <- lib/libtalloc.so.2
 #   libandroid-shmem.so   <- lib/libandroid-shmem.so
 #
-# The binaries are Termux's own, unmodified except for two ELF header edits made with patchelf so
-# that they load from nativeLibraryDir: their DT_RUNPATH (Termux's
-# /data/data/com.termux/files/usr/lib) becomes $ORIGIN, and their DT_NEEDED entries use the
-# lib*.so names above (Android only extracts files named lib*.so from an APK).
+# The binaries are Termux's own, unmodified except for a few dynamic-section strings, rewritten in
+# place by patch-elf-strings.py (nothing in the files moves) so that they load from
+# nativeLibraryDir: proot's DT_RUNPATH (Termux's /data/data/com.termux/files/usr/lib) becomes
+# $ORIGIN, and libtalloc.so.2 becomes libtalloc.so (Android only extracts files named lib*.so from
+# an APK).
 #
 # Each .deb is located through the repository's package index and checked against the SHA-256
-# it lists. Requires: curl, python3, dpkg-deb, patchelf, sha256sum (and xz/gzip for the index).
+# it lists. Requires: curl, python3, dpkg-deb, readelf, sha256sum (and xz/gzip for the index).
 #
 # Usage: scripts/fetch-proot.sh [output jniLibs dir]
 set -euo pipefail
 
+PATCH_ELF="$(dirname "$0")/patch-elf-strings.py"
 REPO="${TERMUX_REPO:-https://packages-cf.termux.dev/apt/termux-main}"
 OUT="${1:-app/src/main/jniLibs}"
 PACKAGES=(proot libtalloc libandroid-shmem)
@@ -115,16 +117,18 @@ for arch in aarch64 arm x86_64 i686; do
     copy_resolved "$root" "$prefix/lib/libtalloc.so.2" "$dest/libtalloc.so"
     copy_resolved "$root" "$prefix/lib/libandroid-shmem.so" "$dest/libandroid-shmem.so"
 
-    for elf in libproot.so libtalloc.so libandroid-shmem.so; do
-        patchelf --set-rpath '$ORIGIN' "$dest/$elf"
-        if patchelf --print-needed "$dest/$elf" | grep -qx 'libtalloc.so.2'; then
-            patchelf --replace-needed libtalloc.so.2 libtalloc.so "$dest/$elf"
+    python3 "$PATCH_ELF" "$dest/libproot.so" --runpath '$ORIGIN' --replace-needed libtalloc.so.2 libtalloc.so
+    python3 "$PATCH_ELF" "$dest/libtalloc.so" --soname libtalloc.so
+    # The two libraries only need Android's own libraries: their RUNPATH, if any, is just made
+    # harmless rather than searched in vain.
+    for lib in libtalloc.so libandroid-shmem.so; do
+        if readelf -d "$dest/$lib" | grep -qE '\((RUNPATH|RPATH)\)'; then
+            python3 "$PATCH_ELF" "$dest/$lib" --runpath '$ORIGIN'
         fi
     done
-    patchelf --set-soname libtalloc.so "$dest/libtalloc.so"
 
     # Everything proot links must now be either bundled next to it or provided by Android.
-    for needed in $(patchelf --print-needed "$dest/libproot.so"); do
+    for needed in $(readelf -d "$dest/libproot.so" | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p'); do
         case "$needed" in
             libc.so|libdl.so|libm.so|liblog.so) ;;
             *) [ -f "$dest/$needed" ] || { echo "libproot.so needs $needed, which is not bundled" >&2; exit 1; } ;;
