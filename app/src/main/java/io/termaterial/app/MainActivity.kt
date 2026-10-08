@@ -32,6 +32,7 @@ import io.termaterial.app.ui.screens.TerminalScreen
 import io.termaterial.app.ui.theme.TermaterialTheme
 import io.termaterial.shell.BootstrapInstaller
 import io.termaterial.shell.BootstrapProgress
+import io.termaterial.shell.BootstrapShellSessionFactory
 
 class MainActivity : ComponentActivity() {
 
@@ -114,6 +115,7 @@ private fun TermaterialApp(
     val progress = progressState.value
 
     var showSettings by remember { mutableStateOf(false) }
+    val prootAvailable = remember { BootstrapShellSessionFactory.isProotAvailable(context) }
 
     // Surfaced instead of letting an exception here crash the app outright (e.g. if the
     // bootstrap's bash cannot be executed on this device - see docs/step-2-shell-backend.md's
@@ -191,6 +193,8 @@ private fun TermaterialApp(
                     )
                 },
                 onUseDynamicColorChange = settingsRepository::setUseDynamicColor,
+                prootAvailable = prootAvailable,
+                onUseProotChange = settingsRepository::setUseProot,
                 onReinstallEnvironment = {
                     showSettings = false
                     sessionManager.closeAllTabs()
@@ -248,6 +252,7 @@ private fun environmentDiagnostics(context: Context): String = runCatching {
         append("prefix=${prefix.absolutePath} exists=${prefix.isDirectory}\n")
         append("bash exists=${bash.isFile} canExecute=${bash.canExecute()} size=${bash.length()}\n")
         append("nativeLibDir=${nativeLibDir.absolutePath}\n")
+        append("proot=${BootstrapShellSessionFactory.isProotAvailable(context)}\n")
         append("nativeLibs=${nativeLibDir.list()?.joinToString(", ") ?: "(unreadable)"}\n")
     }
 }.getOrElse { "diagnostics failed: $it" }

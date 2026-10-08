@@ -16,6 +16,9 @@
     <string name="settings_dynamic_color_description">Couleurs dérivées du fond d\'écran (Android 12+)</string>
     <string name="settings_dynamic_color_unavailable">Nécessite Android 12 ou supérieur</string>
     <string name="settings_environment">Environnement</string>
+    <string name="settings_proot">Compatibilité Termux (proot)</string>
+    <string name="settings_proot_description">Nécessaire pour installer des paquets (pkg, apt). S\'applique aux nouveaux onglets.</string>
+    <string name="settings_proot_unavailable">proot n\'est pas inclus dans cet APK (build local) : shell lancé directement, sans installation de paquets possible.</string>
     <string name="settings_reinstall">Réinstaller l\'environnement Termux</string>
     <string name="settings_reinstall_confirm_title">Réinstaller l\'environnement ?</string>
     <string name="settings_reinstall_confirm_text">Toutes les sessions seront fermées et le dossier $PREFIX (usr) sera retéléchargé : les paquets installés depuis seront perdus. Le dossier personnel (home) est conservé.</string>

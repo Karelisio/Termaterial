@@ -76,6 +76,16 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      # Termux's prebuilt proot (+ libtalloc, libandroid-shmem), packaged as native libraries so
+      # that shells can run in proot mode - see scripts/fetch-proot.sh and
+      # BootstrapShellSessionFactory. Without it the app still works, in direct mode only.
+      - name: Stage Termux proot in the APK
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends patchelf > /dev/null
+          PROOT_MANIFEST=proot-packages.txt scripts/fetch-proot.sh app/src/main/jniLibs
+
       - name: Build all modules (debug)
         run: ./gradlew assembleDebug --stacktrace
 
@@ -92,10 +102,12 @@ jobs:
           echo "APK: $APK"
           unzip -l "$APK" | grep '\.so$' || true
           for abi in arm64-v8a armeabi-v7a x86 x86_64; do
-            if ! unzip -l "$APK" | grep -q "lib/$abi/libtermux\.so"; then
-              echo "::error::lib/$abi/libtermux.so is missing from the APK - the pty JNI library was not packaged."
-              exit 1
-            fi
+            for lib in libtermux.so libproot.so libproot-loader.so libtalloc.so libandroid-shmem.so; do
+              if ! unzip -l "$APK" | grep -q "lib/$abi/$lib"; then
+                echo "::error::lib/$abi/$lib is missing from the APK."
+                exit 1
+              fi
+            done
           done
 
       - name: Upload debug APK
@@ -126,7 +138,12 @@ jobs:
           TAG="v$VERSION_NAME"
           ASSET="termaterial-$VERSION_NAME.apk"
           cp "$APK" "$ASSET"
-          NOTES="APK debug généré automatiquement par la CI (branche \`$GITHUB_REF_NAME\`, commit $GITHUB_SHA)."
+          NOTES="APK debug généré automatiquement par la CI (branche \`$GITHUB_REF_NAME\`, commit $GITHUB_SHA).
+
+          Inclut proot, libtalloc et libandroid-shmem de Termux, inchangés à part leurs en-têtes ELF (voir scripts/fetch-proot.sh) - sources : https://github.com/termux/proot (GPL-2.0), https://www.samba.org/ftp/talloc/ (LGPL-3.0), https://github.com/termux/libandroid-shmem (BSD-3-Clause). Paquets utilisés :
+          \`\`\`
+          $(cat proot-packages.txt)
+          \`\`\`"
           # Not --prerelease: Obtainium (and GitHub's own /releases/latest) resolve "latest
           # release" by excluding prereleases - this is still clearly a debug build via the
           # tag/title, not a claim of stability.

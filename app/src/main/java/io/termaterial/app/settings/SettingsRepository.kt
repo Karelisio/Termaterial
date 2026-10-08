@@ -47,11 +47,17 @@ class SettingsRepository(context: Context) {
         _settings.value = _settings.value.copy(useDynamicColor = enabled)
     }
 
+    fun setUseProot(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_USE_PROOT, enabled).apply()
+        _settings.value = _settings.value.copy(useProot = enabled)
+    }
+
     private fun readSettings(): AppSettings = AppSettings(
         monospaceFont = MonospaceFont.fromId(prefs.getString(KEY_FONT, null)),
         fontSizeSp = prefs.getInt(KEY_FONT_SIZE, AppSettings.DEFAULT_FONT_SIZE_SP),
         terminalPalette = TerminalPalette.fromId(prefs.getString(KEY_PALETTE, null)),
         useDynamicColor = prefs.getBoolean(KEY_DYNAMIC_COLOR, true),
+        useProot = prefs.getBoolean(KEY_USE_PROOT, true),
     )
 
     companion object {
@@ -60,5 +66,6 @@ class SettingsRepository(context: Context) {
         private const val KEY_FONT_SIZE = "font_size_sp"
         private const val KEY_PALETTE = "terminal_palette"
         private const val KEY_DYNAMIC_COLOR = "use_dynamic_color"
+        private const val KEY_USE_PROOT = "use_proot"
     }
 }

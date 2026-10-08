@@ -62,6 +62,17 @@ android {
     buildFeatures {
         compose = true
     }
+
+    packaging {
+        jniLibs {
+            // Native libraries extracted to nativeLibraryDir at install time instead of being
+            // loaded straight from the APK: proot and its loader (staged by
+            // scripts/fetch-proot.sh) are executables, which only work as real files on disk.
+            useLegacyPackaging = true
+            // Termux's binaries are already stripped; leave them byte for byte as staged.
+            keepDebugSymbols += listOf("**/libproot*.so", "**/libtalloc.so", "**/libandroid-shmem.so")
+        }
+    }
 }
 
 dependencies {

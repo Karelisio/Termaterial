@@ -6,33 +6,37 @@ import com.termux.terminal.TerminalSessionClient
 import java.io.File
 
 /**
- * Creates [TerminalSession]s that run the extracted Termux bootstrap's `bash` directly.
+ * Creates [TerminalSession]s running the extracted Termux bootstrap, in one of two modes.
  *
- * The bootstrap's binaries are real Android ELF executables (interpreter
- * `/system/bin/linker64`/`linker`), not something that needs a userspace sandbox like proot to
- * run - Termux itself has executed them directly since 2021. What termux-packages hardcodes at
- * build time is Termux's own data directory, `/data/data/com.termux`, which never exists for a
- * different application ID:
- * - in text files (script shebangs, `etc/profile`...) and symlinks: rewritten once, at install
- *   time, by [BootstrapFixups];
- * - in ELF binaries, as each binary's `DT_RUNPATH` (`.../usr/lib`): the Android dynamic linker
- *   consults `LD_LIBRARY_PATH` *before* `DT_RUNPATH`, so pointing it at this app's real `lib`
- *   directory is enough;
- * - in ELF binaries, as other compiled-in paths: overridden here for the ones that matter
- *   (bash's system profile, apt's whole directory layout, the CA bundle).
+ * Everything termux-packages builds hardcodes Termux's own data directory,
+ * `/data/data/com.termux`, which never exists for a different application ID - in scripts,
+ * symlinks, ELF binaries (`DT_RUNPATH`, compiled-in config paths) and in the paths inside every
+ * `.deb` package.
  *
- * See docs/step-2-shell-backend.md for how this was verified against a real bootstrap archive,
- * and for what this approach still does not cover (installing packages with apt/dpkg).
+ * - **proot mode** (preferred, when the APK ships [ProotBinaries]): the shell runs under proot with
+ *   this app's data directory bound at `/data/data/com.termux`, so every one of those paths
+ *   resolves, exactly as in Termux - including `pkg`/`apt install`, package maintainer scripts and
+ *   whatever paths installed programs have compiled in. Costs a ptrace-based syscall
+ *   interception.
+ * - **direct mode** (fallback): the bootstrap's bash runs as is. Text files and symlinks were
+ *   rewritten at install time by [BootstrapFixups]; `DT_RUNPATH` is superseded by
+ *   `LD_LIBRARY_PATH`; the compiled-in paths that matter for the bootstrap itself (bash's system
+ *   profile, apt's directory layout, CA bundles) are overridden here. Installing packages cannot
+ *   work in this mode (dpkg extracts them to `/data/data/com.termux/...`).
+ *
+ * See docs/step-2-shell-backend.md and docs/step-7-reprise.md.
  */
 class BootstrapShellSessionFactory {
 
     /**
-     * Builds and starts a new bash [TerminalSession]. [BootstrapInstaller.install] must have
-     * completed successfully before calling this.
+     * Builds and starts a new shell [TerminalSession] - under proot when [useProot] is set and
+     * the APK ships it, directly otherwise. [BootstrapInstaller.install] must have completed
+     * successfully before calling this.
      */
     fun createSession(
         context: Context,
         client: TerminalSessionClient,
+        useProot: Boolean = true,
         transcriptRows: Int = DEFAULT_TRANSCRIPT_ROWS,
     ): TerminalSession {
         val realPrefixDir = TermaterialPaths.realPrefixDir(context)
@@ -46,8 +50,20 @@ class BootstrapShellSessionFactory {
         }
 
         // Directories apt expects to find: the bootstrap ships none of them, and Android may clear
-        // the cache directory at any time.
+        // the cache directory at any time. The same real directories in both modes.
         for (dir in runtimeDirectories(realPrefixDir, aptCacheDir)) dir.mkdirs()
+
+        val proot = if (useProot) ProotBinaries.find(TermaterialPaths.nativeLibraryDir(context)) else null
+        if (proot != null) {
+            return TerminalSession(
+                /* shellPath = */ proot.proot.absolutePath,
+                /* cwd = */ realHomeDir.absolutePath,
+                /* args = */ buildProotArguments(proot, TermaterialPaths.realDataDir(context)).toTypedArray(),
+                /* env = */ buildProotEnvironment(proot, realPrefixDir, systemEnv = System.getenv()).toTypedArray(),
+                /* transcriptRows = */ transcriptRows,
+                /* client = */ client,
+            )
+        }
 
         // Both rewritten on every session so they can never go stale relative to the real paths.
         aptConfigFile(realPrefixDir).writeText(buildAptConfigOverride(realPrefixDir, aptCacheDir))
@@ -109,6 +125,71 @@ class BootstrapShellSessionFactory {
             |fi
             |
         """.trimMargin()
+
+        /** Termux's paths, as every program of the bootstrap and of its packages expects them. */
+        const val TERMUX_PREFIX = "${TermuxPathRewriter.TERMUX_DATA_DIR}/files/usr"
+        const val TERMUX_HOME = "${TermuxPathRewriter.TERMUX_DATA_DIR}/files/home"
+
+        /** True if this APK ships proot, i.e. if [createSession] can use proot mode. */
+        fun isProotAvailable(context: Context): Boolean =
+            ProotBinaries.find(TermaterialPaths.nativeLibraryDir(context)) != null
+
+        /**
+         * proot's command line: this app's data directory bound at `/data/data/com.termux` (see
+         * the class doc) on top of the real root file system, then Termux's own `login` script -
+         * which sets up termux-exec and `SHELL` and starts bash as a login shell, reading
+         * `$PREFIX/etc/profile` and the user's files as in Termux.
+         *
+         * `--kill-on-exit`: when the shell exits, its leftover background processes go too, rather
+         * than lingering untraced (and thus without any of these paths).
+         * `--link2symlink`: Android forbids hard links to apps; proot emulates them.
+         */
+        internal fun buildProotArguments(binaries: ProotBinaries, realDataDir: File): List<String> = listOf(
+            binaries.proot.absolutePath,
+            "--kill-on-exit",
+            "--link2symlink",
+            "-b", "${realDataDir.absolutePath}:${TermuxPathRewriter.TERMUX_DATA_DIR}",
+            "-w", TERMUX_HOME,
+            "$TERMUX_PREFIX/bin/login",
+        )
+
+        /**
+         * Environment of proot mode: Termux's own paths (they resolve inside proot) - so no
+         * `LD_LIBRARY_PATH`/`APT_CONFIG` workaround - plus what proot itself needs to know about
+         * where it was installed, since Termux built it to run from its own prefix.
+         */
+        internal fun buildProotEnvironment(
+            binaries: ProotBinaries,
+            realPrefixDir: File,
+            systemEnv: Map<String, String> = emptyMap(),
+            extra: Map<String, String> = emptyMap(),
+        ): List<String> {
+            val env = linkedMapOf<String, String>()
+            for (key in ANDROID_ENV_PASSTHROUGH) {
+                systemEnv[key]?.let { env[key] = it }
+            }
+            env += linkedMapOf(
+                "HOME" to TERMUX_HOME,
+                "PREFIX" to TERMUX_PREFIX,
+                "PATH" to "$TERMUX_PREFIX/bin",
+                "TMPDIR" to "$TERMUX_PREFIX/tmp",
+                "LANG" to "en_US.UTF-8",
+                "TERM" to "xterm-256color",
+                "COLORTERM" to "truecolor",
+                // Exported by the Termux app since v0.119; its login script and
+                // termux-setup-package-manager fall back to guesswork without it.
+                "TERMUX_APP_PACKAGE_MANAGER" to "apt",
+                // No Termux welcome banner: it points at Termux's own support channels.
+                "TERMUX_HUSHLOGIN" to "1",
+                // Termux's proot looks for these under its own $PREFIX by default, which only
+                // exists inside the guest it has not set up yet - so real, outside paths.
+                "PROOT_LOADER" to binaries.loader.absolutePath,
+                "PROOT_TMP_DIR" to "${realPrefixDir.absolutePath}/tmp",
+            )
+            binaries.loader32?.let { env["PROOT_LOADER_32"] = it.absolutePath }
+            env += extra
+            return env.map { (key, value) -> "$key=$value" }
+        }
 
         internal fun runtimeDirectories(realPrefixDir: File, aptCacheDir: File): List<File> = listOf(
             File(realPrefixDir, "tmp"),

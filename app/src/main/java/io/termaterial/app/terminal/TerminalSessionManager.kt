@@ -82,7 +82,11 @@ class TerminalSessionManager(
             onCloseRequested = { closeTab(id) },
             onFontSizeStep = settingsRepository::stepFontSize,
         )
-        val session = BootstrapShellSessionFactory().createSession(appContext, client)
+        val session = BootstrapShellSessionFactory().createSession(
+            appContext,
+            client,
+            useProot = settingsRepository.settings.value.useProot,
+        )
         val tab = TerminalTab(id, nextTabNumber++, session, client, title, finished)
         tabs += tab
         activeTabId = id

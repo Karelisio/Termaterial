@@ -29,4 +29,7 @@ object TermaterialPaths {
     fun installedVersionMarker(context: Context): File = File(realPrefixDir(context), ".TERMATERIAL_BOOTSTRAP_VERSION")
 
     fun realBashBinary(context: Context): File = File(realPrefixDir(context), "bin/bash")
+
+    /** Where Android extracted the APK's native libraries - [ProotBinaries] among them. */
+    fun nativeLibraryDir(context: Context): File = File(context.applicationInfo.nativeLibraryDir)
 }

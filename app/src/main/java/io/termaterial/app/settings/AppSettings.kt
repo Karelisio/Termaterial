@@ -7,6 +7,8 @@ data class AppSettings(
     val fontSizeSp: Int = DEFAULT_FONT_SIZE_SP,
     val terminalPalette: TerminalPalette = TerminalPalette.Green,
     val useDynamicColor: Boolean = true,
+    /** Run shells under proot (see BootstrapShellSessionFactory), when the APK ships it. */
+    val useProot: Boolean = true,
 ) {
     companion object {
         const val DEFAULT_FONT_SIZE_SP = 14

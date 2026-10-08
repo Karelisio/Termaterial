@@ -44,6 +44,8 @@ fun SettingsBottomSheet(
     onFontSizeChange: (Int) -> Unit,
     onTerminalPaletteChange: (TerminalPalette) -> Unit,
     onUseDynamicColorChange: (Boolean) -> Unit,
+    prootAvailable: Boolean,
+    onUseProotChange: (Boolean) -> Unit,
     onReinstallEnvironment: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -114,9 +116,35 @@ fun SettingsBottomSheet(
             }
 
             SettingsSectionTitle(stringResource(id = R.string.settings_environment))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                    Text(
+                        text = stringResource(id = R.string.settings_proot),
+                        style = MaterialTheme.typography.bodyLarge,
+                    )
+                    Text(
+                        text = if (prootAvailable) {
+                            stringResource(id = R.string.settings_proot_description)
+                        } else {
+                            stringResource(id = R.string.settings_proot_unavailable)
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(
+                    checked = settings.useProot && prootAvailable,
+                    enabled = prootAvailable,
+                    onCheckedChange = onUseProotChange,
+                )
+            }
             OutlinedButton(
                 onClick = { confirmReinstall = true },
-                modifier = Modifier.padding(bottom = 16.dp),
+                modifier = Modifier.padding(top = 12.dp, bottom = 16.dp),
             ) {
                 Text(stringResource(id = R.string.settings_reinstall))
             }
