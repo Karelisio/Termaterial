@@ -1,5 +1,11 @@
 # Etape 4 - Fonctionnalites
 
+> **Mise a jour (Etape 7)** : les onglets appartiennent maintenant a
+> `TerminalSessionManager` (niveau processus) et non plus a `MainActivity` ;
+> un shell termine garde son onglet ouvert jusqu'a Entree ; Ctrl/Alt valent
+> pour la touche suivante (appui long = verrouille) ; la barre de touches suit
+> la disposition Termux sur deux rangees. Voir [`step-7-reprise.md`](step-7-reprise.md).
+
 ## Ce qui a ete fait
 
 ### Onglets multi-sessions

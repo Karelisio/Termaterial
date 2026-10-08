@@ -1,5 +1,10 @@
 # Etape 5 - Permissions Android & foreground service
 
+> **Mise a jour (Etape 7)** : le service n'est plus lie (`bindService`) a
+> `MainActivity` : il observe directement `TerminalSessionManager`, s'arrete
+> des que le dernier onglet est ferme et propose une action "Quitter". Voir
+> [`step-7-reprise.md`](step-7-reprise.md).
+
 ## Ce qui a ete fait
 
 ### Stockage
