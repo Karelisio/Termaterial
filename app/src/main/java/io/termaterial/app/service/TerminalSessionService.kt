@@ -8,7 +8,6 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
-import android.os.Binder
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
@@ -17,36 +16,42 @@ import androidx.core.content.ContextCompat
 import io.termaterial.app.CrashReporter
 import io.termaterial.app.MainActivity
 import io.termaterial.app.R
+import io.termaterial.app.TermaterialApplication
+import io.termaterial.app.terminal.TerminalSessionManager
 
 /**
- * Foreground service that keeps this app's process alive (and thus its open
- * [com.termux.terminal.TerminalSession]s, whose I/O threads run independently of any Activity)
- * while at least one shell session is open, even when the app is in the background - "façon
- * Termux" per the task spec.
+ * Foreground service that keeps this app's process alive - and with it the
+ * [TerminalSessionManager]'s open [com.termux.terminal.TerminalSession]s, whose I/O threads run
+ * independently of any Activity - while at least one tab is open, even when the app is in the
+ * background, the way Termux does.
  *
- * Deliberately does not own the sessions itself (they stay in `MainActivity`'s Compose state, as
- * built in Steps 3-4): a persistent foreground notification only needs the count and title to
- * display, not the sessions themselves, and duplicating session ownership here would be a bigger
- * architectural change for no real benefit at this scope. See docs/step-5-permissions.md.
+ * Does not own the sessions (the process-wide [TerminalSessionManager] does): it only mirrors
+ * their count and the active tab's title in its persistent notification, offers an "Exit" action,
+ * and stops itself once the last tab is closed.
  */
 class TerminalSessionService : Service() {
 
-    private val binder = LocalBinder()
+    private lateinit var sessionManager: TerminalSessionManager
     private var notificationManager: NotificationManager? = null
-
-    inner class LocalBinder : Binder() {
-        fun getService(): TerminalSessionService = this@TerminalSessionService
-    }
+    private val sessionsListener: () -> Unit = { onSessionsChanged() }
 
     override fun onCreate() {
         super.onCreate()
         notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         createNotificationChannel()
+        sessionManager = (application as TermaterialApplication).sessionManager
+        sessionManager.addListener(sessionsListener)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_EXIT) {
+            sessionManager.exit() // -> onSessionsChanged() -> stops the service
+            return START_NOT_STICKY
+        }
         try {
-            startInForeground(sessionCount = 0, activeTitle = null)
+            // Always, even with no tab left: a service started with startForegroundService()
+            // must call startForeground() or the system kills the app.
+            startInForeground()
         } catch (e: Exception) {
             // Keeping a session alive in the background is a nice-to-have, not something the
             // terminal itself depends on to function in the foreground - never let a failure to
@@ -55,23 +60,34 @@ class TerminalSessionService : Service() {
             // still visible on next launch even though it isn't fatal.
             CrashReporter.record(this, "TerminalSessionService.startInForeground:\n\n${e.stackTraceToString()}")
             stopSelf()
+            return START_NOT_STICKY
         }
+        if (sessionManager.tabs.isEmpty()) stopKeepingAlive()
         return START_NOT_STICKY
     }
 
-    override fun onBind(intent: Intent?): IBinder = binder
-
-    /** Called by MainActivity whenever the open-tab count or the active tab's title changes. */
-    fun updateStatus(sessionCount: Int, activeTitle: String?) {
-        if (sessionCount <= 0) {
-            stopSelf()
-            return
-        }
-        notificationManager?.notify(NOTIFICATION_ID, buildNotification(sessionCount, activeTitle))
+    override fun onDestroy() {
+        sessionManager.removeListener(sessionsListener)
+        super.onDestroy()
     }
 
-    private fun startInForeground(sessionCount: Int, activeTitle: String?) {
-        val notification = buildNotification(sessionCount, activeTitle)
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    private fun onSessionsChanged() {
+        if (sessionManager.tabs.isEmpty()) {
+            stopKeepingAlive()
+        } else {
+            notificationManager?.notify(NOTIFICATION_ID, buildNotification())
+        }
+    }
+
+    private fun stopKeepingAlive() {
+        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
+
+    private fun startInForeground() {
+        val notification = buildNotification()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             ServiceCompat.startForeground(
                 this,
@@ -84,14 +100,22 @@ class TerminalSessionService : Service() {
         }
     }
 
-    private fun buildNotification(sessionCount: Int, activeTitle: String?): Notification {
+    private fun buildNotification(): Notification {
         val openAppIntent = PendingIntent.getActivity(
             this,
             0,
             Intent(this, MainActivity::class.java).setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE,
         )
+        val exitIntent = PendingIntent.getService(
+            this,
+            0,
+            Intent(this, TerminalSessionService::class.java).setAction(ACTION_EXIT),
+            PendingIntent.FLAG_IMMUTABLE,
+        )
 
+        val sessionCount = sessionManager.tabs.size
+        val activeTitle = sessionManager.activeTab?.title?.value
         val content = if (sessionCount > 1) {
             getString(R.string.notification_content_multi, sessionCount)
         } else {
@@ -103,6 +127,7 @@ class TerminalSessionService : Service() {
             .setContentText(content)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentIntent(openAppIntent)
+            .addAction(0, getString(R.string.notification_action_exit), exitIntent)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
@@ -126,6 +151,7 @@ class TerminalSessionService : Service() {
     companion object {
         private const val CHANNEL_ID = "terminal_sessions"
         private const val NOTIFICATION_ID = 1
+        private const val ACTION_EXIT = "io.termaterial.app.action.EXIT"
 
         fun start(context: Context) {
             // Not just startService(): a service that will immediately promote itself to

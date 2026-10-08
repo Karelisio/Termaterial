@@ -1,14 +1,11 @@
 package io.termaterial.app
 
 import android.Manifest
-import android.content.ComponentName
+import android.app.Activity
 import android.content.Context
-import android.content.Intent
-import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
-import android.os.IBinder
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -17,48 +14,26 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
-import io.termaterial.app.service.TerminalSessionService
 import io.termaterial.app.settings.SettingsRepository
-import io.termaterial.app.terminal.AppTerminalClient
-import io.termaterial.app.terminal.ExtraKeysState
 import io.termaterial.app.terminal.TerminalColorSchemeApplier
-import io.termaterial.app.terminal.TerminalTab
+import io.termaterial.app.terminal.TerminalSessionManager
 import io.termaterial.app.ui.screens.BootstrapProgressScreen
 import io.termaterial.app.ui.screens.SettingsBottomSheet
 import io.termaterial.app.ui.screens.TerminalScreen
 import io.termaterial.app.ui.theme.TermaterialTheme
 import io.termaterial.shell.BootstrapInstaller
 import io.termaterial.shell.BootstrapProgress
-import io.termaterial.shell.BootstrapShellSessionFactory
-import java.util.UUID
 
 class MainActivity : ComponentActivity() {
-
-    /** Bound once [ensureBackgroundServiceStarted] connects; null while unbound/before that. */
-    private val terminalSessionService = mutableStateOf<TerminalSessionService?>(null)
-
-    private val serviceConnection = object : ServiceConnection {
-        override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
-            terminalSessionService.value = (binder as? TerminalSessionService.LocalBinder)?.getService()
-        }
-
-        override fun onServiceDisconnected(name: ComponentName?) {
-            terminalSessionService.value = null
-        }
-    }
-
-    private var boundToService = false
 
     // POST_NOTIFICATIONS (API 33+) only controls whether the foreground-service notification is
     // *visible*; the service itself starts and keeps the session alive either way (see
@@ -67,6 +42,12 @@ class MainActivity : ComponentActivity() {
     // gracefully rather than crash" the task asks for.
     private val requestNotificationPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
+    private lateinit var sessionManager: TerminalSessionManager
+
+    // The notification's "Exit" action: leave the screen as well, as Termux does. A plain
+    // listener rather than Compose state, so it also works while this Activity is stopped.
+    private val exitListener: () -> Unit = { finish() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -79,10 +60,12 @@ class MainActivity : ComponentActivity() {
             requestNotificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
 
-        val settingsRepository = SettingsRepository(applicationContext)
+        val app = application as TermaterialApplication
+        sessionManager = app.sessionManager
+        sessionManager.addExitListener(exitListener)
         StartupTrace.log(this, "settings loaded, calling setContent")
         setContent {
-            val settings by settingsRepository.settings.collectAsState()
+            val settings by app.settingsRepository.settings.collectAsState()
             TermaterialTheme(
                 useDynamicColor = settings.useDynamicColor,
                 terminalPalette = settings.terminalPalette,
@@ -92,56 +75,45 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background,
                 ) {
                     TermaterialApp(
-                        settingsRepository = settingsRepository,
-                        service = terminalSessionService,
-                        onEnsureBackgroundServiceStarted = ::ensureBackgroundServiceStarted,
+                        settingsRepository = app.settingsRepository,
+                        sessionManager = app.sessionManager,
                     )
                 }
             }
         }
     }
 
-    private fun ensureBackgroundServiceStarted() {
-        if (boundToService) return
-        boundToService = true
-        try {
-            TerminalSessionService.start(this)
-            bindService(Intent(this, TerminalSessionService::class.java), serviceConnection, Context.BIND_AUTO_CREATE)
-        } catch (e: Exception) {
-            // The terminal itself must keep working even if the background-keep-alive service
-            // can't start (see TerminalSessionService.onStartCommand for the same reasoning).
-            CrashReporter.record(this, "MainActivity.ensureBackgroundServiceStarted:\n\n${e.stackTraceToString()}")
-        }
-    }
-
     override fun onDestroy() {
+        sessionManager.removeExitListener(exitListener)
         super.onDestroy()
-        if (boundToService) {
-            runCatching { unbindService(serviceConnection) }
-        }
     }
 }
+
+/** What the next [BootstrapInstaller.install] collection should do; a new instance restarts it. */
+private data class InstallRequest(val attempt: Int, val forceReinstall: Boolean)
 
 @Composable
 private fun TermaterialApp(
     settingsRepository: SettingsRepository,
-    service: State<TerminalSessionService?>,
-    onEnsureBackgroundServiceStarted: () -> Unit,
+    sessionManager: TerminalSessionManager,
 ) {
     val context = LocalContext.current
-    val installer = remember { BootstrapInstaller(context) }
+    val installer = remember { BootstrapInstaller(context.applicationContext) }
     val settings by settingsRepository.settings.collectAsState()
 
-    // Bumped to force a fresh install() collection (with forceReinstall=true) after a failure.
-    var installAttempt by remember { mutableIntStateOf(0) }
-    val progress by remember(installAttempt) {
-        installer.install(forceReinstall = installAttempt > 0)
-    }.collectAsState(initial = BootstrapProgress.CheckingExistingInstallation)
+    var installRequest by remember { mutableStateOf(InstallRequest(attempt = 0, forceReinstall = false)) }
+    // Keyed state rather than Flow.collectAsState(): that one keeps showing the previous flow's
+    // last value (e.g. Installed) until the new flow emits, which would let the tab-opening effect
+    // below start a shell in the very installation a reinstall is about to delete.
+    val progressState = remember(installRequest) {
+        mutableStateOf<BootstrapProgress>(BootstrapProgress.CheckingExistingInstallation)
+    }
+    LaunchedEffect(installRequest) {
+        installer.install(forceReinstall = installRequest.forceReinstall).collect { progressState.value = it }
+    }
+    val progress = progressState.value
 
-    val extraKeysState = remember { ExtraKeysState() }
     var showSettings by remember { mutableStateOf(false) }
-    val tabs = remember { mutableStateListOf<TerminalTab>() }
-    var activeTabId by remember { mutableStateOf<String?>(null) }
 
     // Surfaced instead of letting an exception here crash the app outright (e.g. if the
     // bootstrap's bash cannot be executed on this device - see docs/step-2-shell-backend.md's
@@ -155,67 +127,31 @@ private fun TermaterialApp(
     }
     var sessionRetryAttempt by remember { mutableIntStateOf(0) }
 
-    fun openNewTab() {
-        // Throwable, not Exception: System.loadLibrary("termux") failing inside JNI's static
-        // initializer surfaces as UnsatisfiedLinkError/ExceptionInInitializerError, which are
-        // Errors and would otherwise sail straight past this handler.
-        try {
-            StartupTrace.log(context, "openNewTab: start")
-            val id = UUID.randomUUID().toString()
-            val title = mutableStateOf<String?>(null)
-            val client = AppTerminalClient(
-                context = context,
-                extraKeysState = extraKeysState,
-                onTitleChanged = { title.value = it },
-                onSessionFinished = {
-                    val wasActive = activeTabId == id
-                    tabs.removeAll { it.id == id }
-                    if (wasActive) {
-                        activeTabId = tabs.lastOrNull()?.id
-                    }
-                },
-            )
-            val session = BootstrapShellSessionFactory().createSession(context, client)
-            StartupTrace.log(context, "openNewTab: TerminalSession created")
-            tabs.add(TerminalTab(id, session, client, title))
-            activeTabId = id
-        } catch (t: Throwable) {
-            StartupTrace.log(context, "openNewTab: FAILED $t")
-            sessionError = "${t.javaClass.simpleName}: ${t.message}\n\n${t.stackTraceToString()}"
-        }
-    }
-
     val isInstalled = progress is BootstrapProgress.Installed
-    // Also re-runs whenever tabs.size changes back to 0 (every tab closed, or a shell exited),
-    // opening a fresh one rather than leaving the user stranded on no screen at all.
-    LaunchedEffect(isInstalled, tabs.size, sessionRetryAttempt) {
-        if (isInstalled && tabs.isEmpty() && sessionError == null) {
+    val tabCount = sessionManager.tabs.size
+    // Also re-runs whenever the tab count drops back to 0 (every tab closed), opening a fresh one
+    // rather than leaving the user stranded on no screen at all. A shell that exits does not close
+    // its tab by itself (see AppTerminalClient.onSessionFinished), so a shell that cannot start
+    // can no longer turn this into an endless reopen loop.
+    LaunchedEffect(isInstalled, tabCount, sessionRetryAttempt) {
+        val leaving = (context as? Activity)?.isFinishing == true
+        if (isInstalled && tabCount == 0 && sessionError == null && !leaving) {
+            // Throwable, not Exception: System.loadLibrary("termux") failing inside JNI's static
+            // initializer surfaces as UnsatisfiedLinkError/ExceptionInInitializerError, which are
+            // Errors and would otherwise sail straight past this handler.
             try {
-                // Prime the (process-wide) terminal color scheme with the persisted palette
-                // before the first session's emulator is created, so it renders with the right
-                // colors from the start instead of flashing the xterm defaults. A no-op on later
-                // re-opens.
-                StartupTrace.log(context, "bootstrap installed, applying palette")
-                TerminalColorSchemeApplier.apply(settings.terminalPalette, sessions = emptyList(), view = null)
-                openNewTab()
+                StartupTrace.log(context, "openNewTab: start")
+                sessionManager.openNewTab()
+                StartupTrace.log(context, "openNewTab: TerminalSession created")
             } catch (t: Throwable) {
-                StartupTrace.log(context, "palette/openNewTab FAILED: $t")
+                StartupTrace.log(context, "openNewTab: FAILED $t")
                 sessionError = "${t.javaClass.simpleName}: ${t.message}\n\n${t.stackTraceToString()}"
             }
         }
-        if (isInstalled && tabs.isNotEmpty()) {
-            onEnsureBackgroundServiceStarted()
-        }
-    }
-
-    // Keep the foreground-service notification (Step 5) in sync with the open tabs.
-    val activeTabTitle = tabs.firstOrNull { it.id == activeTabId }?.title?.value
-    LaunchedEffect(tabs.size, activeTabTitle, service.value) {
-        service.value?.updateStatus(sessionCount = tabs.size, activeTitle = activeTabTitle)
     }
 
     val currentSessionError = sessionError
-    val currentActiveId = activeTabId
+    val activeTab = sessionManager.activeTab
     if (currentSessionError != null) {
         BootstrapProgressScreen(
             progress = BootstrapProgress.Failed(currentSessionError),
@@ -224,22 +160,21 @@ private fun TermaterialApp(
                 sessionRetryAttempt++
             },
         )
-    } else if (currentActiveId != null && tabs.isNotEmpty()) {
+    } else if (isInstalled && activeTab != null) {
         TerminalScreen(
-            tabs = tabs,
-            activeTabId = currentActiveId,
+            tabs = sessionManager.tabs,
+            activeTab = activeTab,
             settings = settings,
-            extraKeysState = extraKeysState,
-            onSelectTab = { activeTabId = it },
-            onNewTab = { openNewTab() },
-            onCloseTab = { id ->
-                tabs.find { it.id == id }?.session?.finishIfRunning()
-                val wasActive = activeTabId == id
-                tabs.removeAll { it.id == id }
-                if (wasActive) {
-                    activeTabId = tabs.lastOrNull()?.id
+            extraKeysState = sessionManager.extraKeysState,
+            onSelectTab = sessionManager::selectTab,
+            onNewTab = {
+                try {
+                    sessionManager.openNewTab()
+                } catch (t: Throwable) {
+                    sessionError = "${t.javaClass.simpleName}: ${t.message}\n\n${t.stackTraceToString()}"
                 }
             },
+            onCloseTab = sessionManager::closeTab,
             onOpenSettings = { showSettings = true },
         )
         if (showSettings) {
@@ -251,18 +186,25 @@ private fun TermaterialApp(
                     settingsRepository.setTerminalPalette(palette)
                     TerminalColorSchemeApplier.apply(
                         palette = palette,
-                        sessions = tabs.map { it.session },
-                        view = tabs.firstOrNull()?.client?.view,
+                        sessions = sessionManager.tabs.map { it.session },
+                        view = activeTab.client.view,
                     )
                 },
                 onUseDynamicColorChange = settingsRepository::setUseDynamicColor,
+                onReinstallEnvironment = {
+                    showSettings = false
+                    sessionManager.closeAllTabs()
+                    installRequest = InstallRequest(installRequest.attempt + 1, forceReinstall = true)
+                },
                 onDismiss = { showSettings = false },
             )
         }
     } else {
         BootstrapProgressScreen(
             progress = progress,
-            onRetry = { installAttempt++ },
+            // Not a forced reinstall: if a bootstrap is already installed (e.g. only applying
+            // fixups to it failed), retrying must not wipe the packages installed since.
+            onRetry = { installRequest = InstallRequest(installRequest.attempt + 1, forceReinstall = false) },
         )
     }
 }

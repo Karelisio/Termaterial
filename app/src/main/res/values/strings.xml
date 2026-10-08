@@ -15,13 +15,22 @@
     <string name="settings_dynamic_color">Dynamic color</string>
     <string name="settings_dynamic_color_description">Couleurs dérivées du fond d\'écran (Android 12+)</string>
     <string name="settings_dynamic_color_unavailable">Nécessite Android 12 ou supérieur</string>
+    <string name="settings_environment">Environnement</string>
+    <string name="settings_reinstall">Réinstaller l\'environnement Termux</string>
+    <string name="settings_reinstall_confirm_title">Réinstaller l\'environnement ?</string>
+    <string name="settings_reinstall_confirm_text">Toutes les sessions seront fermées et le dossier $PREFIX (usr) sera retéléchargé : les paquets installés depuis seront perdus. Le dossier personnel (home) est conservé.</string>
+    <string name="settings_reinstall_confirm">Réinstaller</string>
+    <string name="cancel">Annuler</string>
 
     <string name="tab_new">Nouvel onglet</string>
     <string name="tab_close">Fermer l\'onglet</string>
+    <string name="tab_default_title">Session %1$d</string>
+    <string name="tab_finished">%1$s (terminée)</string>
 
     <string name="notification_channel_name">Sessions terminal actives</string>
     <string name="notification_channel_description">Notification persistante tant qu\'une session shell tourne, y compris en arrière-plan</string>
     <string name="notification_title">Termaterial</string>
     <string name="notification_content_single">Session active : %1$s</string>
     <string name="notification_content_multi">%1$d sessions actives</string>
+    <string name="notification_action_exit">Quitter</string>
 </resources>

@@ -20,6 +20,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import io.termaterial.app.R
 import io.termaterial.app.terminal.TerminalTab
@@ -43,11 +44,16 @@ fun TerminalTabRow(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         for (tab in tabs) {
-            val title by tab.title
+            val finished by tab.finished
             FilterChip(
                 selected = tab.id == activeTabId,
                 onClick = { onSelectTab(tab.id) },
-                label = { Text(text = title?.takeIf { it.isNotBlank() } ?: stringResource(id = R.string.app_name)) },
+                label = {
+                    Text(
+                        text = if (finished) stringResource(id = R.string.tab_finished, tabLabel(tab)) else tabLabel(tab),
+                        textDecoration = if (finished) TextDecoration.LineThrough else null,
+                    )
+                },
                 trailingIcon = if (tabs.size > 1) {
                     {
                         IconButton(onClick = { onCloseTab(tab.id) }, modifier = Modifier.size(18.dp)) {

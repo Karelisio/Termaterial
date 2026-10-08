@@ -27,8 +27,14 @@ class SettingsRepository(context: Context) {
 
     fun setFontSizeSp(sizeSp: Int) {
         val clamped = sizeSp.coerceIn(AppSettings.MIN_FONT_SIZE_SP, AppSettings.MAX_FONT_SIZE_SP)
+        if (clamped == _settings.value.fontSizeSp) return
         prefs.edit().putInt(KEY_FONT_SIZE, clamped).apply()
         _settings.value = _settings.value.copy(fontSizeSp = clamped)
+    }
+
+    /** One step up or down, e.g. for pinch to zoom. */
+    fun stepFontSize(increase: Boolean) {
+        setFontSizeSp(_settings.value.fontSizeSp + if (increase) 1 else -1)
     }
 
     fun setTerminalPalette(palette: TerminalPalette) {

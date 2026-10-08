@@ -6,15 +6,22 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -26,7 +33,8 @@ import io.termaterial.app.ui.theme.TerminalPalette
 
 /**
  * Settings screen (Step 4): monospace font, text size, terminal color theme, dynamic color
- * on/off - as a Material 3 [ModalBottomSheet], per the Step 3 UI requirement.
+ * on/off - as a Material 3 [ModalBottomSheet], per the Step 3 UI requirement - plus a way to
+ * reinstall the Termux environment if it ends up broken.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -36,8 +44,11 @@ fun SettingsBottomSheet(
     onFontSizeChange: (Int) -> Unit,
     onTerminalPaletteChange: (TerminalPalette) -> Unit,
     onUseDynamicColorChange: (Boolean) -> Unit,
+    onReinstallEnvironment: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    var confirmReinstall by remember { mutableStateOf(false) }
+
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
@@ -101,7 +112,36 @@ fun SettingsBottomSheet(
                     onCheckedChange = onUseDynamicColorChange,
                 )
             }
+
+            SettingsSectionTitle(stringResource(id = R.string.settings_environment))
+            OutlinedButton(
+                onClick = { confirmReinstall = true },
+                modifier = Modifier.padding(bottom = 16.dp),
+            ) {
+                Text(stringResource(id = R.string.settings_reinstall))
+            }
         }
+    }
+
+    if (confirmReinstall) {
+        AlertDialog(
+            onDismissRequest = { confirmReinstall = false },
+            title = { Text(stringResource(id = R.string.settings_reinstall_confirm_title)) },
+            text = { Text(stringResource(id = R.string.settings_reinstall_confirm_text)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmReinstall = false
+                    onReinstallEnvironment()
+                }) {
+                    Text(stringResource(id = R.string.settings_reinstall_confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmReinstall = false }) {
+                    Text(stringResource(id = R.string.cancel))
+                }
+            },
+        )
     }
 }
 

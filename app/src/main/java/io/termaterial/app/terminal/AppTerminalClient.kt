@@ -15,16 +15,21 @@ import io.termaterial.app.StartupTrace
 
 /**
  * [TerminalSessionClient] + [TerminalViewClient] implementation wiring a [TerminalSession] to a
- * [TerminalView] and to simple Compose-facing callbacks.
+ * [TerminalView] and to simple callbacks of its owning [TerminalSessionManager].
+ *
+ * Lives as long as its session - i.e. longer than any Activity - so it only ever holds the
+ * application [Context]; [view] is cleared by the hosting composable when it goes away.
  */
 class AppTerminalClient(
-    private val context: Context,
+    private val appContext: Context,
     private val extraKeysState: ExtraKeysState,
     private val onTitleChanged: (String?) -> Unit,
     private val onSessionFinished: () -> Unit,
+    private val onCloseRequested: () -> Unit,
+    private val onFontSizeStep: (increase: Boolean) -> Unit,
 ) : TerminalSessionClient, TerminalViewClient {
 
-    /** Set once the hosting Composable creates its [TerminalView]; used to request repaints. */
+    /** Set while a [TerminalView] displays this client's session; used to request repaints. */
     var view: TerminalView? = null
 
     // --- TerminalSessionClient ---
@@ -38,22 +43,28 @@ class AppTerminalClient(
     }
 
     override fun onSessionFinished(finishedSession: TerminalSession) {
+        // TerminalSession has already printed "[Process completed (code N) - press Enter]": the
+        // tab stays open (see onKeyDown/onCodePoint) so whatever the shell printed before exiting
+        // - e.g. why it could not start - stays readable, instead of the tab vanishing at once.
         onSessionFinished()
+        view?.onScreenUpdated()
     }
 
     override fun onCopyTextToClipboard(session: TerminalSession, text: String?) {
         if (text.isNullOrEmpty()) return
-        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+        val clipboard = appContext.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
         clipboard?.setPrimaryClip(ClipData.newPlainText("Termaterial", text))
     }
 
     override fun onPasteTextFromClipboard(session: TerminalSession?) {
-        if (session == null) return
-        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-        val text = clipboard?.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)
+        val emulator = session?.emulator ?: return
+        val clipboard = appContext.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+        val text = clipboard?.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(appContext)
         if (!text.isNullOrEmpty()) {
-            val bytes = text.toString().toByteArray(Charsets.UTF_8)
-            session.write(bytes, 0, bytes.size)
+            // Not a raw write: paste() converts newlines to the carriage returns a terminal expects
+            // and honours bracketed paste mode, so a multi-line paste is not run line by line by
+            // the shell as it arrives.
+            emulator.paste(text.toString())
         }
     }
 
@@ -107,12 +118,19 @@ class AppTerminalClient(
 
     // --- TerminalViewClient ---
 
-    override fun onScale(scale: Float): Float = scale
+    /** Pinch to zoom: one font size step per noticeable pinch, as Termux does. */
+    override fun onScale(scale: Float): Float {
+        if (scale < 0.9f || scale > 1.1f) {
+            onFontSizeStep(scale > 1f)
+            return 1.0f
+        }
+        return scale
+    }
 
     override fun onSingleTapUp(e: MotionEvent) {
         val terminalView = view ?: return
         terminalView.requestFocus()
-        val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+        val imm = terminalView.context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
         imm?.showSoftInput(terminalView, InputMethodManager.SHOW_IMPLICIT)
     }
 
@@ -128,26 +146,39 @@ class AppTerminalClient(
         // No-op.
     }
 
-    override fun onKeyDown(keyCode: Int, e: KeyEvent, session: TerminalSession): Boolean = false
+    override fun onKeyDown(keyCode: Int, e: KeyEvent, session: TerminalSession): Boolean {
+        if (!session.isRunning && keyCode == KeyEvent.KEYCODE_ENTER) {
+            onCloseRequested()
+            return true
+        }
+        return false
+    }
 
     override fun onKeyUp(keyCode: Int, e: KeyEvent): Boolean = false
 
     override fun onLongPress(event: MotionEvent): Boolean = false
 
-    override fun readControlKey(): Boolean = extraKeysState.controlActive
+    override fun readControlKey(): Boolean = extraKeysState.consumeControl()
 
-    override fun readAltKey(): Boolean = extraKeysState.altActive
+    override fun readAltKey(): Boolean = extraKeysState.consumeAlt()
 
     override fun readShiftKey(): Boolean = false
 
     override fun readFnKey(): Boolean = false
 
-    override fun onCodePoint(codePoint: Int, ctrlDown: Boolean, session: TerminalSession): Boolean = false
+    override fun onCodePoint(codePoint: Int, ctrlDown: Boolean, session: TerminalSession): Boolean {
+        // Soft keyboards often send Enter as text rather than as a key event.
+        if (!session.isRunning && (codePoint == '\r'.code || codePoint == '\n'.code)) {
+            onCloseRequested()
+            return true
+        }
+        return false
+    }
 
     override fun onEmulatorSet() {
         // The pty is live and the emulator is attached: startup got all the way through, so the
         // next launch has nothing to report. See StartupTrace.
-        StartupTrace.log(context, StartupTrace.SESSION_READY)
+        StartupTrace.log(appContext, StartupTrace.SESSION_READY)
     }
 
     companion object {

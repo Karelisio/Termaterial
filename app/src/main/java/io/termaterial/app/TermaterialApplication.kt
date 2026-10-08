@@ -2,8 +2,20 @@ package io.termaterial.app
 
 import android.app.Application
 import android.os.Build
+import io.termaterial.app.settings.SettingsRepository
+import io.termaterial.app.terminal.TerminalColorSchemeApplier
+import io.termaterial.app.terminal.TerminalSessionManager
 
 class TermaterialApplication : Application() {
+
+    /** Process-wide, like the terminal sessions whose rendering they configure. */
+    lateinit var settingsRepository: SettingsRepository
+        private set
+
+    /** Process-wide owner of every open terminal tab, see [TerminalSessionManager]. */
+    lateinit var sessionManager: TerminalSessionManager
+        private set
+
     override fun onCreate() {
         super.onCreate()
         CrashReporter.install(this)
@@ -21,5 +33,16 @@ class TermaterialApplication : Application() {
             StartupTrace.log(this, "loadLibrary(termux) FAILED: $t")
         }
         StartupTrace.log(this, "nativeLibraryDir=${applicationInfo.nativeLibraryDir}")
+
+        settingsRepository = SettingsRepository(this)
+        // The terminal color scheme is a process-wide static: prime it with the persisted palette
+        // before any session's emulator exists, so the first one renders with the right colors
+        // instead of flashing the xterm defaults.
+        try {
+            TerminalColorSchemeApplier.apply(settingsRepository.settings.value.terminalPalette, sessions = emptyList(), view = null)
+        } catch (t: Throwable) {
+            StartupTrace.log(this, "TerminalColorSchemeApplier FAILED: $t")
+        }
+        sessionManager = TerminalSessionManager(this, settingsRepository)
     }
 }
