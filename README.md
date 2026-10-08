@@ -25,9 +25,7 @@ Le projet est construit étape par étape :
       officiel et lance `bash` directement (pas de `proot` — vérification
       empirique du bootstrap réel a montré qu'il n'était pas nécessaire ; le
       `RUNPATH` figé des binaires est corrigé via `LD_LIBRARY_PATH`). Voir
-      [`docs/step-2-shell-backend.md`](docs/step-2-shell-backend.md) — inclut
-      un point d'attention important sur Android 10+ à trancher avant
-      l'Étape 6.
+      [`docs/step-2-shell-backend.md`](docs/step-2-shell-backend.md).
 - [x] **Étape 3 — UI Compose Material You** : module `app`, thème
       `TermaterialTheme` (dynamic color API 31+, palette terminal
       vert/ambre en fallback), `TerminalScreen` (TopAppBar + `TerminalView`
@@ -47,10 +45,30 @@ Le projet est construit étape par étape :
       [`docs/step-5-permissions.md`](docs/step-5-permissions.md).
 - [x] **Étape 6 — Build & vérification** : la CI compile les 4 modules et
       produit un APK debug (`terminal-emulator`, `terminal-view`, `shell`,
-      `app`) à chaque push — voir le badge ci-dessus. Reste un point ouvert
-      avant de considérer le projet totalement terminé : le comportement
-      réel sur Android 10+ (voir `docs/step-2-shell-backend.md`), qui ne
-      peut être vérifié que sur un appareil/émulateur réel.
+      `app`) à chaque push — voir le badge ci-dessus. Le shell démarre sur
+      un appareil réel Android 10+ (`targetSdk` 28, voir
+      `docs/step-2-shell-backend.md`).
+- [x] **Étape 7 — Reprise** : audit et corrections (chemins `com.termux`
+      figés dans les scripts et liens du bootstrap, `apt update`, sessions
+      perdues à la recréation de l'Activity, pertes de données possibles à
+      la réinstallation, collage, Ctrl/Alt, x86, CI/Obtainium), barre de
+      touches à la Termux, pincer pour zoomer. Voir
+      [`docs/step-7-reprise.md`](docs/step-7-reprise.md).
+
+## Limite connue
+
+L'installation de paquets (`pkg install`, `apt install`) ne fonctionne pas
+encore : les paquets Termux ont `/data/data/com.termux` codé en dur (chemins
+d'extraction des `.deb`, scripts, binaires), inaccessible sous un autre nom
+de paquet. Les options (nom de paquet `com.termux` ou proot) sont détaillées
+dans [`docs/step-7-reprise.md`](docs/step-7-reprise.md#limite-majeure-restante--installer-des-paquets).
+
+## Installation
+
+Chaque push produit une release GitHub `v<version>-debug.<n>` avec l'APK
+debug (signature de debug stable : chaque build s'installe en mise à jour du
+précédent). Compatible avec [Obtainium](https://github.com/ImranR98/Obtainium)
+en suivant ce dépôt.
 
 ## Structure
 

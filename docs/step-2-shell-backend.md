@@ -1,5 +1,13 @@
 # Etape 2 - Shell backend (bootstrap + exec direct)
 
+> **Mise a jour (Etape 7)** : les chemins `/data/data/com.termux` figes dans
+> les scripts et liens symboliques du bootstrap sont desormais reecrits a
+> l'installation (`BootstrapFixups`), `APT_CONFIG` couvre toutes les cles
+> compilees d'apt, et bash est lance avec un rcfile qui rejoue la sequence de
+> login Termux au lieu de `--login --noprofile`. La "limite connue" sur les
+> shebangs decrite plus bas est donc levee pour le bootstrap ; l'installation
+> de paquets reste a faire. Voir [`step-7-reprise.md`](step-7-reprise.md).
+
 > Cette etape a ete revisee une fois en cours de route : la premiere version
 > utilisait `proot`, mais en telechargeant et en inspectant le vrai
 > `bootstrap-aarch64.zip` de termux-packages, il s'est avere que `proot`
