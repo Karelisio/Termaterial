@@ -54,14 +54,20 @@ Le projet est construit étape par étape :
       la réinstallation, collage, Ctrl/Alt, x86, CI/Obtainium), barre de
       touches à la Termux, pincer pour zoomer. Voir
       [`docs/step-7-reprise.md`](docs/step-7-reprise.md).
+- [x] **Étape 8 — Mode proot** : proot de Termux embarqué dans l'APK pour
+      installer des paquets (`pkg install`) sans renommer l'app. Voir
+      [`docs/step-8-proot.md`](docs/step-8-proot.md).
 
-## Limite connue
+## Installer des paquets
 
-L'installation de paquets (`pkg install`, `apt install`) ne fonctionne pas
-encore : les paquets Termux ont `/data/data/com.termux` codé en dur (chemins
-d'extraction des `.deb`, scripts, binaires), inaccessible sous un autre nom
-de paquet. Les options (nom de paquet `com.termux` ou proot) sont détaillées
-dans [`docs/step-7-reprise.md`](docs/step-7-reprise.md#limite-majeure-restante--installer-des-paquets).
+En mode proot (par défaut dans les APK de la CI), le shell tourne sous
+[proot](https://github.com/termux/proot) avec le dossier de l'app monté à
+la place de `/data/data/com.termux` : `pkg install` / `apt install`
+doivent ainsi fonctionner comme dans Termux, en cohabitant avec lui (pas
+encore vérifié sur appareil). Sans proot (build
+local, ou réglage désactivé), le shell est lancé directement et
+l'installation de paquets n'est pas possible. Voir
+[`docs/step-8-proot.md`](docs/step-8-proot.md).
 
 ## Installation
 
@@ -92,3 +98,10 @@ Ce dépôt combine du code sous plusieurs licences :
 
 Aucun autre module de termux-app (bootstrap installer, plugins, app shell)
 n'a été importé : seuls le moteur d'émulation et la vue de rendu le sont.
+
+Les APK produits par la CI embarquent aussi les binaires Termux de
+[proot](https://github.com/termux/proot) (GPL-2.0),
+[talloc](https://www.samba.org/ftp/talloc/) (LGPL-3.0) et
+[libandroid-shmem](https://github.com/termux/libandroid-shmem)
+(BSD-3-Clause), récupérés par `scripts/fetch-proot.sh` ; les versions
+exactes sont indiquées dans les notes de chaque release.

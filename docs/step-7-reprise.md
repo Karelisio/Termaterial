@@ -150,4 +150,6 @@ Options :
   chaque installation...) : fragile, toujours incomplet a cause du point 3.
 
 Recommandation : **A** si cohabiter avec Termux n'est pas necessaire,
-sinon **B**. Decision a prendre avant d'aller plus loin.
+sinon **B**.
+
+**Decision : B (proot)**, voir [`step-8-proot.md`](step-8-proot.md).
