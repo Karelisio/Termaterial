@@ -9,6 +9,8 @@ data class AppSettings(
     val useDynamicColor: Boolean = true,
     /** Run shells under proot (see BootstrapShellSessionFactory), when the APK ships it. */
     val useProot: Boolean = true,
+    /** Look for a new release at startup (at most every few hours, see UpdateManager). */
+    val autoCheckUpdates: Boolean = true,
 ) {
     companion object {
         const val DEFAULT_FONT_SIZE_SP = 14

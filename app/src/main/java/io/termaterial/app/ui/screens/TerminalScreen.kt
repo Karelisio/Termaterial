@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -50,6 +52,8 @@ fun TerminalScreen(
     onNewTab: () -> Unit,
     onCloseTab: (String) -> Unit,
     onOpenSettings: () -> Unit,
+    /** Shows a badge on the settings button, where the update can be found again. */
+    updateAvailable: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     var terminalView by remember { mutableStateOf<TerminalView?>(null) }
@@ -74,10 +78,12 @@ fun TerminalScreen(
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
                     actions = {
                         IconButton(onClick = onOpenSettings) {
-                            Icon(
-                                imageVector = Icons.Filled.Settings,
-                                contentDescription = stringResource(id = R.string.settings),
-                            )
+                            BadgedBox(badge = { if (updateAvailable) Badge() }) {
+                                Icon(
+                                    imageVector = Icons.Filled.Settings,
+                                    contentDescription = stringResource(id = R.string.settings),
+                                )
+                            }
                         }
                     },
                 )

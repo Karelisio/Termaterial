@@ -27,6 +27,11 @@ android {
         val ciBuildNumber = providers.environmentVariable("GITHUB_RUN_NUMBER").orNull?.toIntOrNull()
         versionCode = ciBuildNumber ?: 1
         versionName = "0.2.0" + (ciBuildNumber?.let { "-debug.$it" } ?: "")
+
+        // GitHub repository whose releases the in-app updater follows: the one CI builds from
+        // (so a fork updates from itself), this one for local builds.
+        val updateRepository = providers.environmentVariable("GITHUB_REPOSITORY").orNull ?: "Karelisio/Termaterial"
+        buildConfigField("String", "UPDATE_REPOSITORY", "\"$updateRepository\"")
     }
 
     signingConfigs {
@@ -61,6 +66,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     packaging {
@@ -95,4 +101,5 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
 
     testImplementation(libs.junit)
+    testImplementation(libs.org.json)
 }

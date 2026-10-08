@@ -13,15 +13,12 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 import java.io.InputStreamReader
-import java.net.HttpURLConnection
-import java.net.URL
 import java.nio.file.FileVisitResult
 import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.nio.file.Path
 import java.nio.file.SimpleFileVisitor
 import java.nio.file.attribute.BasicFileAttributes
-import java.security.MessageDigest
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 
@@ -90,7 +87,7 @@ class BootstrapInstaller(private val context: Context) {
         val arch = BootstrapArch.forSupportedAbis(Build.SUPPORTED_ABIS)
         val zipFile = File(context.cacheDir, arch.assetFileName)
         try {
-            val sha256 = downloadWithProgress(bootstrapDownloadUrl(arch), zipFile) { bytesRead, totalBytes ->
+            val sha256 = HttpDownload.download(bootstrapDownloadUrl(arch), zipFile) { bytesRead, totalBytes ->
                 emit(BootstrapProgress.Downloading(bytesRead, totalBytes))
             }
             val expectedSha256 = BOOTSTRAP_SHA256.getValue(arch)
@@ -127,66 +124,6 @@ class BootstrapInstaller(private val context: Context) {
 
     private fun bootstrapDownloadUrl(arch: BootstrapArch): String =
         "$BOOTSTRAP_RELEASES_BASE_URL/$BOOTSTRAP_RELEASE_TAG/${arch.assetFileName}"
-
-    /** Downloads [urlString] to [destFile], following redirects; returns the file's SHA-256 (hex). */
-    private suspend fun downloadWithProgress(
-        urlString: String,
-        destFile: File,
-        onProgress: suspend (bytesRead: Long, totalBytes: Long) -> Unit,
-    ): String {
-        var currentUrl = urlString
-        var connection: HttpURLConnection? = null
-        try {
-            var redirects = 0
-            while (true) {
-                val url = URL(currentUrl)
-                val conn = url.openConnection() as HttpURLConnection
-                conn.instanceFollowRedirects = false
-                conn.connectTimeout = CONNECT_TIMEOUT_MS
-                conn.readTimeout = READ_TIMEOUT_MS
-                conn.connect()
-
-                val code = conn.responseCode
-                if (code in HTTP_REDIRECT_CODES) {
-                    val location = conn.getHeaderField("Location")
-                        ?: throw IOException("Redirect from $currentUrl had no Location header")
-                    conn.disconnect()
-                    redirects++
-                    if (redirects > MAX_REDIRECTS) {
-                        throw IOException("Too many redirects while downloading $urlString")
-                    }
-                    currentUrl = URL(URL(currentUrl), location).toString()
-                    continue
-                }
-                if (code != HttpURLConnection.HTTP_OK) {
-                    conn.disconnect()
-                    throw IOException("Unexpected HTTP $code while downloading $currentUrl")
-                }
-
-                connection = conn
-                break
-            }
-
-            val digest = MessageDigest.getInstance("SHA-256")
-            val totalBytes = connection.contentLengthLong
-            connection.inputStream.use { input ->
-                FileOutputStream(destFile).use { output ->
-                    val buffer = ByteArray(DOWNLOAD_BUFFER_SIZE)
-                    var bytesRead = 0L
-                    var read: Int
-                    while (input.read(buffer).also { read = it } != -1) {
-                        output.write(buffer, 0, read)
-                        digest.update(buffer, 0, read)
-                        bytesRead += read
-                        onProgress(bytesRead, totalBytes)
-                    }
-                }
-            }
-            return digest.digest().joinToString("") { "%02x".format(it) }
-        } finally {
-            connection?.disconnect()
-        }
-    }
 
     /**
      * Extracts [zipFile] (an unmodified `bootstrap-<arch>.zip` from termux-packages) into
@@ -281,18 +218,7 @@ class BootstrapInstaller(private val context: Context) {
         private const val SYMLINK_SEPARATOR = "←"
 
         private const val PROGRESS_EVERY_ENTRIES = 64
-        private const val DOWNLOAD_BUFFER_SIZE = 32 * 1024
         private const val EXTRACT_BUFFER_SIZE = 32 * 1024
-        private const val CONNECT_TIMEOUT_MS = 30_000
-        private const val READ_TIMEOUT_MS = 30_000
-        private const val MAX_REDIRECTS = 5
-        private val HTTP_REDIRECT_CODES = setOf(
-            HttpURLConnection.HTTP_MOVED_PERM,
-            HttpURLConnection.HTTP_MOVED_TEMP,
-            HttpURLConnection.HTTP_SEE_OTHER,
-            307,
-            308,
-        )
 
         /**
          * [relativePath] resolved under [dir], refusing anything that would land outside of it

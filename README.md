@@ -57,6 +57,10 @@ Le projet est construit étape par étape :
 - [x] **Étape 8 — Mode proot** : proot de Termux embarqué dans l'APK pour
       installer des paquets (`pkg install`) sans renommer l'app. Voir
       [`docs/step-8-proot.md`](docs/step-8-proot.md).
+- [x] **Étape 9 — Mise à jour intégrée** : vérification des releases
+      GitHub, changelog des versions manquées, téléchargement avec barre de
+      progression et installation depuis l'app. Voir
+      [`docs/step-9-mises-a-jour.md`](docs/step-9-mises-a-jour.md).
 
 ## Installer des paquets
 
@@ -72,8 +76,10 @@ l'installation de paquets n'est pas possible. Voir
 ## Installation
 
 Chaque push produit une release GitHub `v<version>-debug.<n>` avec l'APK
-debug (signature de debug stable : chaque build s'installe en mise à jour du
-précédent). Compatible avec [Obtainium](https://github.com/ImranR98/Obtainium)
+debug et la liste des changements (signature de debug stable : chaque build
+s'installe en mise à jour du précédent). Une fois installée, l'app se met à
+jour elle-même (Réglages → Mises à jour, ou proposition au démarrage) ; elle
+reste aussi compatible avec [Obtainium](https://github.com/ImranR98/Obtainium)
 en suivant ce dépôt.
 
 ## Structure

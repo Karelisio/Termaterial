@@ -52,12 +52,18 @@ class SettingsRepository(context: Context) {
         _settings.value = _settings.value.copy(useProot = enabled)
     }
 
+    fun setAutoCheckUpdates(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_AUTO_CHECK_UPDATES, enabled).apply()
+        _settings.value = _settings.value.copy(autoCheckUpdates = enabled)
+    }
+
     private fun readSettings(): AppSettings = AppSettings(
         monospaceFont = MonospaceFont.fromId(prefs.getString(KEY_FONT, null)),
         fontSizeSp = prefs.getInt(KEY_FONT_SIZE, AppSettings.DEFAULT_FONT_SIZE_SP),
         terminalPalette = TerminalPalette.fromId(prefs.getString(KEY_PALETTE, null)),
         useDynamicColor = prefs.getBoolean(KEY_DYNAMIC_COLOR, true),
         useProot = prefs.getBoolean(KEY_USE_PROOT, true),
+        autoCheckUpdates = prefs.getBoolean(KEY_AUTO_CHECK_UPDATES, true),
     )
 
     companion object {
@@ -67,5 +73,6 @@ class SettingsRepository(context: Context) {
         private const val KEY_PALETTE = "terminal_palette"
         private const val KEY_DYNAMIC_COLOR = "use_dynamic_color"
         private const val KEY_USE_PROOT = "use_proot"
+        private const val KEY_AUTO_CHECK_UPDATES = "auto_check_updates"
     }
 }

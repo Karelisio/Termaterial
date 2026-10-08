@@ -5,6 +5,7 @@ import android.os.Build
 import io.termaterial.app.settings.SettingsRepository
 import io.termaterial.app.terminal.TerminalColorSchemeApplier
 import io.termaterial.app.terminal.TerminalSessionManager
+import io.termaterial.app.update.UpdateManager
 
 class TermaterialApplication : Application() {
 
@@ -14,6 +15,10 @@ class TermaterialApplication : Application() {
 
     /** Process-wide owner of every open terminal tab, see [TerminalSessionManager]. */
     lateinit var sessionManager: TerminalSessionManager
+        private set
+
+    /** Process-wide, so that an update download survives the Activity being recreated. */
+    lateinit var updateManager: UpdateManager
         private set
 
     override fun onCreate() {
@@ -44,5 +49,11 @@ class TermaterialApplication : Application() {
             StartupTrace.log(this, "TerminalColorSchemeApplier FAILED: $t")
         }
         sessionManager = TerminalSessionManager(this, settingsRepository)
+        updateManager = UpdateManager(
+            context = this,
+            currentVersionName = BuildConfig.VERSION_NAME,
+            currentVersionCode = BuildConfig.VERSION_CODE,
+            repository = BuildConfig.UPDATE_REPOSITORY,
+        )
     }
 }

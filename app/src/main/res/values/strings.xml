@@ -24,6 +24,32 @@
     <string name="settings_reinstall_confirm_text">Toutes les sessions seront fermées et le dossier $PREFIX (usr) sera retéléchargé : les paquets installés depuis seront perdus. Le dossier personnel (home) est conservé.</string>
     <string name="settings_reinstall_confirm">Réinstaller</string>
     <string name="cancel">Annuler</string>
+    <string name="close">Fermer</string>
+
+    <string name="settings_updates">Mises à jour</string>
+    <string name="settings_updates_installed">Version installée : %1$s</string>
+    <string name="settings_updates_check">Rechercher une mise à jour</string>
+    <string name="settings_updates_checking">Recherche en cours…</string>
+    <string name="settings_updates_up_to_date">Termaterial est à jour.</string>
+    <string name="settings_updates_available">Version %1$s disponible</string>
+    <string name="settings_updates_show">Voir</string>
+    <string name="settings_updates_auto">Vérifier au démarrage</string>
+
+    <string name="update_available_title">Mise à jour disponible</string>
+    <string name="update_versions">Version %1$s (installée : %2$s)</string>
+    <string name="update_no_changelog">Pas de notes pour cette version.</string>
+    <string name="update_sessions_warning">L\'installation ferme l\'application et les sessions ouvertes.</string>
+    <string name="update_install">Mettre à jour</string>
+    <string name="update_retry">Réessayer</string>
+    <string name="update_later">Plus tard</string>
+    <string name="update_download_progress">%1$s / %2$s (%3$d %%)</string>
+    <string name="update_download_progress_unknown">%1$s téléchargés</string>
+    <string name="update_installing">Confirmez l\'installation dans la fenêtre d\'Android.</string>
+    <string name="update_error_install">Échec de l\'installation : %1$s</string>
+    <string name="update_error_checksum">Le fichier téléchargé est corrompu (somme de contrôle différente), réessayez.</string>
+    <string name="update_error_not_apk">Le fichier téléchargé n\'est pas une mise à jour valide de Termaterial.</string>
+    <string name="update_error_rate_limited">Limite de requêtes GitHub atteinte, réessayez dans une heure.</string>
+    <string name="update_error_offline">Pas de connexion à Internet.</string>
 
     <string name="tab_new">Nouvel onglet</string>
     <string name="tab_close">Fermer l\'onglet</string>

@@ -10,6 +10,10 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
+    <!-- In-app updates: hands the downloaded APK to the system installer (UpdateManager), which
+         asks the user to confirm and, the first time, to allow this app to install apps. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
     <application
         android:name=".TermaterialApplication"
         android:allowBackup="false"
@@ -39,6 +43,10 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Keeps an interactive terminal shell session running when the app is in the background, the way a desktop terminal emulator keeps a shell alive." />
         </service>
+
+        <receiver
+            android:name=".update.UpdateInstallReceiver"
+            android:exported="false" />
 
     </application>
 

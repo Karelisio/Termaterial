@@ -29,6 +29,8 @@ import io.termaterial.app.terminal.TerminalSessionManager
 import io.termaterial.app.ui.screens.BootstrapProgressScreen
 import io.termaterial.app.ui.screens.SettingsBottomSheet
 import io.termaterial.app.ui.screens.TerminalScreen
+import io.termaterial.app.ui.screens.UpdateDialog
+import io.termaterial.app.update.UpdateManager
 import io.termaterial.app.ui.theme.TermaterialTheme
 import io.termaterial.shell.BootstrapInstaller
 import io.termaterial.shell.BootstrapProgress
@@ -78,6 +80,7 @@ class MainActivity : ComponentActivity() {
                     TermaterialApp(
                         settingsRepository = app.settingsRepository,
                         sessionManager = app.sessionManager,
+                        updateManager = app.updateManager,
                     )
                 }
             }
@@ -97,6 +100,7 @@ private data class InstallRequest(val attempt: Int, val forceReinstall: Boolean)
 private fun TermaterialApp(
     settingsRepository: SettingsRepository,
     sessionManager: TerminalSessionManager,
+    updateManager: UpdateManager,
 ) {
     val context = LocalContext.current
     val installer = remember { BootstrapInstaller(context.applicationContext) }
@@ -116,6 +120,11 @@ private fun TermaterialApp(
 
     var showSettings by remember { mutableStateOf(false) }
     val prootAvailable = remember { BootstrapShellSessionFactory.isProotAvailable(context) }
+
+    val updateState by updateManager.state.collectAsState()
+    LaunchedEffect(Unit) {
+        if (settingsRepository.settings.value.autoCheckUpdates) updateManager.checkIfDue()
+    }
 
     // Surfaced instead of letting an exception here crash the app outright (e.g. if the
     // bootstrap's bash cannot be executed on this device - see docs/step-2-shell-backend.md's
@@ -178,6 +187,7 @@ private fun TermaterialApp(
             },
             onCloseTab = sessionManager::closeTab,
             onOpenSettings = { showSettings = true },
+            updateAvailable = updateState.offer != null,
         )
         if (showSettings) {
             SettingsBottomSheet(
@@ -200,6 +210,14 @@ private fun TermaterialApp(
                     sessionManager.closeAllTabs()
                     installRequest = InstallRequest(installRequest.attempt + 1, forceReinstall = true)
                 },
+                currentVersionName = updateManager.currentVersionName,
+                updateState = updateState,
+                onCheckForUpdates = { updateManager.check(userInitiated = true) },
+                onShowUpdate = {
+                    showSettings = false
+                    updateManager.showOffer()
+                },
+                onAutoCheckUpdatesChange = settingsRepository::setAutoCheckUpdates,
                 onDismiss = { showSettings = false },
             )
         }
@@ -209,6 +227,18 @@ private fun TermaterialApp(
             // Not a forced reinstall: if a bootstrap is already installed (e.g. only applying
             // fixups to it failed), retrying must not wipe the packages installed since.
             onRetry = { installRequest = InstallRequest(installRequest.attempt + 1, forceReinstall = false) },
+        )
+    }
+
+    // Above whichever screen is showing - including the first-launch one, so that a broken build
+    // can still be updated away from.
+    if (updateState.dialogVisible) {
+        UpdateDialog(
+            state = updateState,
+            currentVersionName = updateManager.currentVersionName,
+            onUpdate = updateManager::startUpdate,
+            onCancelDownload = updateManager::cancelDownload,
+            onDismiss = updateManager::dismiss,
         )
     }
 }

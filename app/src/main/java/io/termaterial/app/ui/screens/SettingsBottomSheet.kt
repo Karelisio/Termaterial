@@ -6,7 +6,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.OutlinedButton
@@ -29,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import io.termaterial.app.R
 import io.termaterial.app.settings.AppSettings
 import io.termaterial.app.settings.MonospaceFont
+import io.termaterial.app.update.UpdateUiState
 import io.termaterial.app.ui.theme.TerminalPalette
 
 /**
@@ -47,6 +52,11 @@ fun SettingsBottomSheet(
     prootAvailable: Boolean,
     onUseProotChange: (Boolean) -> Unit,
     onReinstallEnvironment: () -> Unit,
+    currentVersionName: String,
+    updateState: UpdateUiState,
+    onCheckForUpdates: () -> Unit,
+    onShowUpdate: () -> Unit,
+    onAutoCheckUpdatesChange: (Boolean) -> Unit,
     onDismiss: () -> Unit,
 ) {
     var confirmReinstall by remember { mutableStateOf(false) }
@@ -55,7 +65,11 @@ fun SettingsBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
     ) {
-        Column(modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp)) {
+        Column(
+            modifier = Modifier
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 24.dp, vertical = 8.dp),
+        ) {
             Text(
                 text = stringResource(id = R.string.settings),
                 style = MaterialTheme.typography.titleLarge,
@@ -144,10 +158,20 @@ fun SettingsBottomSheet(
             }
             OutlinedButton(
                 onClick = { confirmReinstall = true },
-                modifier = Modifier.padding(top = 12.dp, bottom = 16.dp),
+                modifier = Modifier.padding(top = 12.dp),
             ) {
                 Text(stringResource(id = R.string.settings_reinstall))
             }
+
+            SettingsSectionTitle(stringResource(id = R.string.settings_updates))
+            UpdatesSection(
+                currentVersionName = currentVersionName,
+                state = updateState,
+                autoCheck = settings.autoCheckUpdates,
+                onCheck = onCheckForUpdates,
+                onShowUpdate = onShowUpdate,
+                onAutoCheckChange = onAutoCheckUpdatesChange,
+            )
         }
     }
 
@@ -170,6 +194,75 @@ fun SettingsBottomSheet(
                 }
             },
         )
+    }
+}
+
+@Composable
+private fun UpdatesSection(
+    currentVersionName: String,
+    state: UpdateUiState,
+    autoCheck: Boolean,
+    onCheck: () -> Unit,
+    onShowUpdate: () -> Unit,
+    onAutoCheckChange: (Boolean) -> Unit,
+) {
+    Text(
+        text = stringResource(id = R.string.settings_updates_installed, currentVersionName),
+        style = MaterialTheme.typography.bodyLarge,
+    )
+    val offer = state.offer
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        when {
+            state.checking -> {
+                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                Text(
+                    text = stringResource(id = R.string.settings_updates_checking),
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(start = 8.dp),
+                )
+            }
+            offer != null -> {
+                Text(
+                    text = stringResource(id = R.string.settings_updates_available, offer.latest.versionName),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = onShowUpdate) { Text(stringResource(id = R.string.settings_updates_show)) }
+            }
+            state.checkError != null -> Text(
+                text = state.checkError,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
+            state.checked -> Text(
+                text = stringResource(id = R.string.settings_updates_up_to_date),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+    OutlinedButton(
+        onClick = onCheck,
+        enabled = !state.checking && state.download == null,
+        modifier = Modifier.padding(top = 8.dp),
+    ) {
+        Text(stringResource(id = R.string.settings_updates_check))
+    }
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 16.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = stringResource(id = R.string.settings_updates_auto),
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.weight(1f).padding(end = 8.dp),
+        )
+        Switch(checked = autoCheck, onCheckedChange = onAutoCheckChange)
     }
 }
 

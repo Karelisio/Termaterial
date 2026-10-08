@@ -29,6 +29,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Full history and tags: the release notes list the commits since the previous release.
+          fetch-depth: 0
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -114,10 +117,11 @@ jobs:
 
       # Actions artifacts require a signed-in GitHub session and expire after 90 days; a Release
       # asset is a stable, directly downloadable link anyone with repo access can open in a
-      # browser - easier to fetch on a phone. One release per build, tagged with the APK's own
-      # versionName (which embeds the run number, see app/build.gradle.kts): update checkers such
-      # as Obtainium compare that tag with the installed version, so a tag that never changed
-      # (one release per branch, its APK replaced in place) could never be seen as an update.
+      # browser - easier to fetch on a phone - and what the app's own updater installs (see
+      # UpdateManager). One release per build, tagged with the APK's own versionName (which
+      # embeds the run number, see app/build.gradle.kts): update checkers such as Obtainium
+      # compare that tag with the installed version, so a tag that never changed (one release per
+      # branch, its APK replaced in place) could never be seen as an update.
       - name: Publish debug APK to a release
         if: github.event_name == 'push'
         env:
@@ -134,12 +138,8 @@ jobs:
           TAG="v$VERSION_NAME"
           ASSET="termaterial-$VERSION_NAME.apk"
           cp "$APK" "$ASSET"
-          NOTES="APK debug généré automatiquement par la CI (branche \`$GITHUB_REF_NAME\`, commit $GITHUB_SHA).
-
-          Inclut proot, libtalloc et libandroid-shmem de Termux, inchangés à part leurs en-têtes ELF (voir scripts/fetch-proot.sh) - sources : https://github.com/termux/proot (GPL-2.0), https://www.samba.org/ftp/talloc/ (LGPL-3.0), https://github.com/termux/libandroid-shmem (BSD-3-Clause). Paquets utilisés :
-          \`\`\`
-          $(cat proot-packages.txt)
-          \`\`\`"
+          # Changelog (shown by the in-app updater) followed by the build details.
+          NOTES="$(scripts/release-notes.sh proot-packages.txt)"
           # Not --prerelease: Obtainium (and GitHub's own /releases/latest) resolve "latest
           # release" by excluding prereleases - this is still clearly a debug build via the
           # tag/title, not a claim of stability.
