@@ -15,6 +15,13 @@ import java.io.IOException
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
+import java.nio.file.FileVisitResult
+import java.nio.file.Files
+import java.nio.file.LinkOption
+import java.nio.file.Path
+import java.nio.file.SimpleFileVisitor
+import java.nio.file.attribute.BasicFileAttributes
+import java.security.MessageDigest
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 
@@ -23,6 +30,8 @@ sealed interface BootstrapProgress {
     data object CheckingExistingInstallation : BootstrapProgress
     data class Downloading(val bytesRead: Long, val totalBytes: Long) : BootstrapProgress
     data class Extracting(val entriesDone: Int) : BootstrapProgress
+    /** Rewriting the bootstrap's hardcoded Termux paths, see [BootstrapFixups]. */
+    data object ApplyingFixups : BootstrapProgress
     data object Installed : BootstrapProgress
     data class Failed(val message: String, val cause: Throwable? = null) : BootstrapProgress
 }
@@ -38,65 +47,80 @@ sealed interface BootstrapProgress {
 class BootstrapInstaller(private val context: Context) {
 
     /**
-     * True if a bootstrap matching [BOOTSTRAP_RELEASE_TAG] is already extracted and ready to use.
-     * Deliberately does not verify every file - only that installation completed and was not
-     * superseded by a different release tag - to keep app startup fast.
+     * True if a bootstrap was completely extracted - whichever [BOOTSTRAP_RELEASE_TAG] it came
+     * from. A newer tag in a later app version must not trigger a reinstall on its own: that would
+     * silently wipe every package the user installed since. Deliberately does not verify every
+     * file, to keep app startup fast.
      */
-    fun isInstalled(): Boolean {
-        val marker = TermaterialPaths.installedVersionMarker(context)
-        if (!marker.isFile) return false
-        return runCatching { marker.readText().trim() }.getOrNull() == BOOTSTRAP_RELEASE_TAG
-    }
+    fun isInstalled(): Boolean =
+        TermaterialPaths.installedVersionMarker(context).isFile &&
+            TermaterialPaths.realBashBinary(context).isFile
 
     /**
      * Downloads and extracts the bootstrap if [isInstalled] is false (or [forceReinstall] is
-     * true), reporting progress via the returned [Flow]. Safe to collect from a Compose UI: all
-     * work runs on [Dispatchers.IO].
+     * true), reporting progress via the returned [Flow]; otherwise only applies [BootstrapFixups]
+     * an older Termaterial version did not apply yet. Safe to collect from a Compose UI: all work
+     * runs on [Dispatchers.IO].
+     *
+     * Everything is prepared in a staging directory first: an existing installation is only
+     * replaced once the new one is complete, so a failed download or extraction never destroys it.
      */
     fun install(forceReinstall: Boolean = false): Flow<BootstrapProgress> = flow {
         emit(BootstrapProgress.CheckingExistingInstallation)
 
+        val prefixDir = TermaterialPaths.realPrefixDir(context)
+        val realDataDir = TermaterialPaths.realDataDir(context)
+
         if (!forceReinstall && isInstalled()) {
+            if (!BootstrapFixups.isApplied(prefixDir)) {
+                emit(BootstrapProgress.ApplyingFixups)
+                BootstrapFixups.apply(prefixDir, realDataDir)
+            }
             emit(BootstrapProgress.Installed)
             return@flow
         }
 
         val stagingDir = TermaterialPaths.realPrefixStagingDir(context)
-        val prefixDir = TermaterialPaths.realPrefixDir(context)
-        val homeDir = TermaterialPaths.realHomeDir(context)
-
-        stagingDir.deleteRecursively()
-        prefixDir.deleteRecursively()
+        deleteTree(stagingDir)
         if (!stagingDir.mkdirs()) {
             throw IOException("Could not create staging directory: $stagingDir")
         }
-        homeDir.mkdirs()
+        TermaterialPaths.realHomeDir(context).mkdirs()
 
         val arch = BootstrapArch.forSupportedAbis(Build.SUPPORTED_ABIS)
         val zipFile = File(context.cacheDir, arch.assetFileName)
+        try {
+            val sha256 = downloadWithProgress(bootstrapDownloadUrl(arch), zipFile) { bytesRead, totalBytes ->
+                emit(BootstrapProgress.Downloading(bytesRead, totalBytes))
+            }
+            val expectedSha256 = BOOTSTRAP_SHA256.getValue(arch)
+            if (!sha256.equals(expectedSha256, ignoreCase = true)) {
+                throw IOException("Checksum mismatch for ${arch.assetFileName}: expected $expectedSha256, got $sha256")
+            }
 
-        downloadWithProgress(bootstrapDownloadUrl(arch), zipFile) { bytesRead, totalBytes ->
-            emit(BootstrapProgress.Downloading(bytesRead, totalBytes))
+            extractBootstrapZip(zipFile, stagingDir) { entriesDone ->
+                emit(BootstrapProgress.Extracting(entriesDone))
+            }
+        } finally {
+            zipFile.delete()
         }
 
-        extractBootstrapZip(zipFile, stagingDir) { entriesDone ->
-            emit(BootstrapProgress.Extracting(entriesDone))
-        }
+        emit(BootstrapProgress.ApplyingFixups)
+        BootstrapFixups.apply(stagingDir, realDataDir)
+        // Written before the swap below, so that the final directory is only ever seen complete.
+        File(stagingDir, TermaterialPaths.installedVersionMarker(context).name).writeText(BOOTSTRAP_RELEASE_TAG)
 
-        zipFile.delete()
-
+        deleteTree(prefixDir)
         if (!stagingDir.renameTo(prefixDir)) {
             throw IOException("Could not move staging directory into place: $stagingDir -> $prefixDir")
         }
-
-        TermaterialPaths.installedVersionMarker(context).writeText(BOOTSTRAP_RELEASE_TAG)
 
         emit(BootstrapProgress.Installed)
     }
         .catch { e ->
             // Using the `catch` operator (rather than a try/catch around the emit calls above)
             // so we don't violate Flow's exception transparency contract.
-            TermaterialPaths.realPrefixStagingDir(context).deleteRecursively()
+            runCatching { deleteTree(TermaterialPaths.realPrefixStagingDir(context)) }
             emit(BootstrapProgress.Failed(e.message ?: e.javaClass.simpleName, e))
         }
         .flowOn(Dispatchers.IO)
@@ -104,11 +128,12 @@ class BootstrapInstaller(private val context: Context) {
     private fun bootstrapDownloadUrl(arch: BootstrapArch): String =
         "$BOOTSTRAP_RELEASES_BASE_URL/$BOOTSTRAP_RELEASE_TAG/${arch.assetFileName}"
 
+    /** Downloads [urlString] to [destFile], following redirects; returns the file's SHA-256 (hex). */
     private suspend fun downloadWithProgress(
         urlString: String,
         destFile: File,
         onProgress: suspend (bytesRead: Long, totalBytes: Long) -> Unit,
-    ) {
+    ): String {
         var currentUrl = urlString
         var connection: HttpURLConnection? = null
         try {
@@ -130,7 +155,7 @@ class BootstrapInstaller(private val context: Context) {
                     if (redirects > MAX_REDIRECTS) {
                         throw IOException("Too many redirects while downloading $urlString")
                     }
-                    currentUrl = location
+                    currentUrl = URL(URL(currentUrl), location).toString()
                     continue
                 }
                 if (code != HttpURLConnection.HTTP_OK) {
@@ -142,6 +167,7 @@ class BootstrapInstaller(private val context: Context) {
                 break
             }
 
+            val digest = MessageDigest.getInstance("SHA-256")
             val totalBytes = connection.contentLengthLong
             connection.inputStream.use { input ->
                 FileOutputStream(destFile).use { output ->
@@ -150,11 +176,13 @@ class BootstrapInstaller(private val context: Context) {
                     var read: Int
                     while (input.read(buffer).also { read = it } != -1) {
                         output.write(buffer, 0, read)
+                        digest.update(buffer, 0, read)
                         bytesRead += read
                         onProgress(bytesRead, totalBytes)
                     }
                 }
             }
+            return digest.digest().joinToString("") { "%02x".format(it) }
         } finally {
             connection?.disconnect()
         }
@@ -190,12 +218,12 @@ class BootstrapInstaller(private val context: Context) {
                         val parts = currentLine.split(SYMLINK_SEPARATOR)
                         if (parts.size != 2) throw IOException("Malformed symlink line: $currentLine")
                         val (linkTarget, relativeLinkPath) = parts
-                        val linkPath = File(stagingDir, relativeLinkPath)
+                        val linkPath = resolveInside(stagingDir, relativeLinkPath)
                         linkPath.parentFile?.mkdirs()
                         symlinks += linkTarget to linkPath.absolutePath
                     }
                 } else {
-                    val targetFile = File(stagingDir, entry.name)
+                    val targetFile = resolveInside(stagingDir, entry.name)
                     if (entry.isDirectory) {
                         targetFile.mkdirs()
                     } else {
@@ -212,11 +240,12 @@ class BootstrapInstaller(private val context: Context) {
                     }
                 }
                 entriesDone++
-                onEntry(entriesDone)
+                if (entriesDone % PROGRESS_EVERY_ENTRIES == 0) onEntry(entriesDone)
                 zipInput.closeEntry()
                 entry = zipInput.nextEntry
             }
         }
+        onEntry(entriesDone)
 
         if (symlinks.isEmpty()) {
             throw IOException("Bootstrap zip did not contain a SYMLINKS.txt entry")
@@ -228,12 +257,20 @@ class BootstrapInstaller(private val context: Context) {
 
     companion object {
         /**
-         * termux-packages bootstrap release tag to install. Bump this (and re-run the app's
-         * reinstall flow) to pick up a newer bootstrap; verified against
-         * `git ls-remote --tags https://github.com/termux/termux-packages.git` at the time this
-         * was written.
+         * termux-packages bootstrap release tag installed on a fresh install. Bumping it only
+         * affects new installations (see [isInstalled]); [BOOTSTRAP_SHA256] must be updated with
+         * it. Verified against `git ls-remote --tags https://github.com/termux/termux-packages.git`
+         * at the time this was written.
          */
         const val BOOTSTRAP_RELEASE_TAG = "bootstrap-2026.09.13-r1+apt.android-7"
+
+        /** SHA-256 of each [BOOTSTRAP_RELEASE_TAG] asset, as downloaded from the release page. */
+        private val BOOTSTRAP_SHA256 = mapOf(
+            BootstrapArch.ARM64_V8A to "dbf2805613ff2ace0b233c3b349e080bb0ff358f4ad64f4cca5966b27b93e7ee",
+            BootstrapArch.ARMEABI_V7A to "ac65b4c4aa10322a9a54f8ec3e3122dec1371bef4834db4455503df0fc33f521",
+            BootstrapArch.X86_64 to "e5b7ce18642c6769acf6cd05586170191fc98f1882ddbde6b5fb5f0b1dc253f0",
+            BootstrapArch.X86 to "790481a60eb90dfcbaccc27113c11fa14d6820215bec7860b9a03e3417ec8277",
+        )
 
         private const val BOOTSTRAP_RELEASES_BASE_URL =
             "https://github.com/termux/termux-packages/releases/download"
@@ -243,6 +280,7 @@ class BootstrapInstaller(private val context: Context) {
         /** U+2190 LEFTWARDS ARROW, the separator termux-packages uses in SYMLINKS.txt entries. */
         private const val SYMLINK_SEPARATOR = "←"
 
+        private const val PROGRESS_EVERY_ENTRIES = 64
         private const val DOWNLOAD_BUFFER_SIZE = 32 * 1024
         private const val EXTRACT_BUFFER_SIZE = 32 * 1024
         private const val CONNECT_TIMEOUT_MS = 30_000
@@ -255,5 +293,40 @@ class BootstrapInstaller(private val context: Context) {
             307,
             308,
         )
+
+        /**
+         * [relativePath] resolved under [dir], refusing anything that would land outside of it
+         * (`../` components or an absolute path in an archive entry name - "zip slip").
+         */
+        internal fun resolveInside(dir: File, relativePath: String): File {
+            val resolved = File(dir, relativePath).canonicalFile
+            val root = dir.canonicalFile
+            if (resolved != root && !resolved.path.startsWith(root.path + File.separator)) {
+                throw IOException("Archive entry escapes the extraction directory: $relativePath")
+            }
+            return File(dir, relativePath)
+        }
+
+        /**
+         * Recursively deletes [dir] without ever following symlinks - unlike
+         * [File.deleteRecursively], which would descend into a symlinked directory and delete
+         * the files it points to (a prefix can contain symlinks to anywhere).
+         */
+        internal fun deleteTree(dir: File) {
+            val root = dir.toPath()
+            if (!Files.exists(root, LinkOption.NOFOLLOW_LINKS)) return
+            Files.walkFileTree(root, object : SimpleFileVisitor<Path>() {
+                override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult {
+                    Files.delete(file)
+                    return FileVisitResult.CONTINUE
+                }
+
+                override fun postVisitDirectory(directory: Path, exc: IOException?): FileVisitResult {
+                    if (exc != null) throw exc
+                    Files.delete(directory)
+                    return FileVisitResult.CONTINUE
+                }
+            })
+        }
     }
 }

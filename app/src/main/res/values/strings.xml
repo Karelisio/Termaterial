@@ -5,6 +5,7 @@
     <string name="bootstrap_checking">Vérification de l\'installation existante…</string>
     <string name="bootstrap_downloading">Téléchargement du bootstrap Termux…</string>
     <string name="bootstrap_extracting">Extraction des fichiers…</string>
+    <string name="bootstrap_applying_fixups">Adaptation des chemins Termux…</string>
     <string name="bootstrap_failed_title">Échec de l\'installation</string>
     <string name="bootstrap_retry">Réessayer</string>
 

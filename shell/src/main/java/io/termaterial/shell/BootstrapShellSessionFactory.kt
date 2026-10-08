@@ -10,16 +10,19 @@ import java.io.File
  *
  * The bootstrap's binaries are real Android ELF executables (interpreter
  * `/system/bin/linker64`/`linker`), not something that needs a userspace sandbox like proot to
- * run - Termux itself has executed them directly since 2021. The only thing hardcoded at build
- * time by termux-packages that matters here is `/data/data/com.termux/files/usr/lib` as each
- * binary's `DT_RUNPATH`; since Termaterial uses a different application ID, that directory does
- * not exist on disk. The Android dynamic linker consults `LD_LIBRARY_PATH` *before*
- * `DT_RUNPATH`, so setting it to this app's real `lib` directory is enough - no bind mounts or
- * fake chroot needed. See docs/step-2-shell-backend.md for how this was verified (by downloading
- * and inspecting a real bootstrap archive) and for the known caveats this simpler approach still
- * carries (some maintainer scripts with a hardcoded `#!/data/data/com.termux/...` shebang, and
- * the Android 10+ exec-from-app-data-directory restriction, which applies here just as it would
- * to any other approach that downloads a binary at runtime).
+ * run - Termux itself has executed them directly since 2021. What termux-packages hardcodes at
+ * build time is Termux's own data directory, `/data/data/com.termux`, which never exists for a
+ * different application ID:
+ * - in text files (script shebangs, `etc/profile`...) and symlinks: rewritten once, at install
+ *   time, by [BootstrapFixups];
+ * - in ELF binaries, as each binary's `DT_RUNPATH` (`.../usr/lib`): the Android dynamic linker
+ *   consults `LD_LIBRARY_PATH` *before* `DT_RUNPATH`, so pointing it at this app's real `lib`
+ *   directory is enough;
+ * - in ELF binaries, as other compiled-in paths: overridden here for the ones that matter
+ *   (bash's system profile, apt's whole directory layout, the CA bundle).
+ *
+ * See docs/step-2-shell-backend.md for how this was verified against a real bootstrap archive,
+ * and for what this approach still does not cover (installing packages with apt/dpkg).
  */
 class BootstrapShellSessionFactory {
 
@@ -34,6 +37,7 @@ class BootstrapShellSessionFactory {
     ): TerminalSession {
         val realPrefixDir = TermaterialPaths.realPrefixDir(context)
         val realHomeDir = TermaterialPaths.realHomeDir(context).apply { mkdirs() }
+        val aptCacheDir = TermaterialPaths.aptCacheDir(context)
         val bashFile = TermaterialPaths.realBashBinary(context)
 
         check(bashFile.canExecute()) {
@@ -41,23 +45,24 @@ class BootstrapShellSessionFactory {
                 "run BootstrapInstaller.install() before creating a shell session"
         }
 
-        // apt/dpkg from the bootstrap have /data/data/com.termux/files/usr baked in as their
-        // config root at build time (see buildAptConfigOverride doc below); write the override
-        // file fresh on every session so it can never go stale relative to realPrefixDir.
-        aptConfigFile(realPrefixDir).writeText(buildAptConfigOverride(realPrefixDir))
+        // Directories apt expects to find: the bootstrap ships none of them, and Android may clear
+        // the cache directory at any time.
+        for (dir in runtimeDirectories(realPrefixDir, aptCacheDir)) dir.mkdirs()
 
-        val env = buildShellEnvironment(realPrefixDir, realHomeDir)
+        // Both rewritten on every session so they can never go stale relative to the real paths.
+        aptConfigFile(realPrefixDir).writeText(buildAptConfigOverride(realPrefixDir, aptCacheDir))
+        val rcFile = bashRcFile(realPrefixDir).apply { writeText(BASH_RC) }
+
+        val env = buildShellEnvironment(realPrefixDir, realHomeDir, systemEnv = System.getenv())
 
         return TerminalSession(
             /* shellPath = */ bashFile.absolutePath,
             /* cwd = */ realHomeDir.absolutePath,
-            // --noprofile: bash's --login otherwise sources /etc/profile from a path baked into
-            // the binary at compile time by termux-packages - literally
-            // /data/data/com.termux/files/usr/etc/profile, another app's private sandbox that can
-            // never exist for us no matter how PREFIX is remapped (confirmed on a real device:
-            // "Permission denied", harmless but confusing). Not a loss: we already set every env
-            // var that file would have (HOME/PREFIX/PATH/LD_LIBRARY_PATH/...) directly above.
-            /* args = */ arrayOf(bashFile.absolutePath, "--login", "--noprofile"),
+            // An interactive *non-login* shell running BASH_RC, rather than `bash --login`: a login
+            // shell reads its system profile from a path compiled into the bootstrap's bash -
+            // /data/data/com.termux/files/usr/etc/profile, another app's private sandbox ("Permission
+            // denied" on a real device). BASH_RC performs the same startup sequence with real paths.
+            /* args = */ arrayOf(bashFile.absolutePath, "--rcfile", rcFile.absolutePath, "-i"),
             /* env = */ env.toTypedArray(),
             /* transcriptRows = */ transcriptRows,
             /* client = */ client,
@@ -67,30 +72,87 @@ class BootstrapShellSessionFactory {
     companion object {
         const val DEFAULT_TRANSCRIPT_ROWS = 2000
 
+        /**
+         * Android runtime variables that `/system/bin` tools (`am`, `pm`, `cmd`, `dalvikvm`...)
+         * need, passed through from this app's own process environment - as Termux does.
+         */
+        private val ANDROID_ENV_PASSTHROUGH = listOf(
+            "ANDROID_ASSETS", "ANDROID_DATA", "ANDROID_ROOT", "ANDROID_STORAGE", "EXTERNAL_STORAGE",
+            "ASEC_MOUNTPOINT", "LOOP_MOUNTPOINT", "ANDROID_RUNTIME_ROOT", "ANDROID_ART_ROOT",
+            "ANDROID_I18N_ROOT", "ANDROID_TZDATA_ROOT", "BOOTCLASSPATH", "DEX2OATBOOTCLASSPATH",
+            "SYSTEMSERVERCLASSPATH",
+        )
+
+        /**
+         * Replaces Termux's login sequence (`login` -> `bash -l` -> `$PREFIX/etc/profile` ->
+         * personal login files), which bash cannot run itself here, see [createSession].
+         * `$PREFIX/etc/profile` has had its paths rewritten by [BootstrapFixups]; it sources
+         * `etc/profile.d/` and `etc/bash.bashrc` (Termux's prompt, history settings,
+         * command-not-found handler, bash-completion).
+         */
+        internal val BASH_RC = """
+            |# Generated by Termaterial at every shell session start: edits are overwritten.
+            |# Put personal settings in ~/.bashrc or ~/.bash_profile, which are read below.
+            |if [ -r "${'$'}PREFIX/etc/profile" ]; then
+            |    . "${'$'}PREFIX/etc/profile"
+            |fi
+            |# Termux's etc/profile sources ~/.bashrc itself, but only in a login shell.
+            |if [ -f "${'$'}HOME/.bashrc" ]; then
+            |    . "${'$'}HOME/.bashrc"
+            |fi
+            |if [ -f "${'$'}HOME/.bash_profile" ]; then
+            |    . "${'$'}HOME/.bash_profile"
+            |elif [ -f "${'$'}HOME/.bash_login" ]; then
+            |    . "${'$'}HOME/.bash_login"
+            |elif [ -f "${'$'}HOME/.profile" ]; then
+            |    . "${'$'}HOME/.profile"
+            |fi
+            |
+        """.trimMargin()
+
+        internal fun runtimeDirectories(realPrefixDir: File, aptCacheDir: File): List<File> = listOf(
+            File(realPrefixDir, "tmp"),
+            File(realPrefixDir, "var/lib/apt/lists/partial"),
+            File(realPrefixDir, "var/log/apt"),
+            File(aptCacheDir, "archives/partial"),
+        )
+
         /** Pure, unit-testable environment builder for the bootstrap's bash. */
         internal fun buildShellEnvironment(
             realPrefixDir: File,
             realHomeDir: File,
+            systemEnv: Map<String, String> = emptyMap(),
             extra: Map<String, String> = emptyMap(),
         ): List<String> {
-            val env = linkedMapOf(
+            val prefix = realPrefixDir.absolutePath
+            val env = linkedMapOf<String, String>()
+            for (key in ANDROID_ENV_PASSTHROUGH) {
+                systemEnv[key]?.let { env[key] = it }
+            }
+            env += linkedMapOf(
                 "HOME" to realHomeDir.absolutePath,
-                "PREFIX" to realPrefixDir.absolutePath,
-                "PATH" to "${realPrefixDir.absolutePath}/bin",
+                "PREFIX" to prefix,
+                "PATH" to "$prefix/bin",
                 // See the class doc: this replaces the bootstrap binaries' hardcoded, nonexistent
                 // /data/data/com.termux/files/usr/lib DT_RUNPATH.
-                "LD_LIBRARY_PATH" to "${realPrefixDir.absolutePath}/lib",
+                "LD_LIBRARY_PATH" to "$prefix/lib",
                 "LANG" to "en_US.UTF-8",
                 "TERM" to "xterm-256color",
                 "COLORTERM" to "truecolor",
-                "TMPDIR" to "${realPrefixDir.absolutePath}/tmp",
-                // See buildAptConfigOverride: redirects apt's compiled-in com.termux config root.
+                "TMPDIR" to "$prefix/tmp",
+                "SHELL" to "$prefix/bin/bash",
+                // See buildAptConfigOverride: redirects apt's compiled-in com.termux layout.
                 "APT_CONFIG" to aptConfigFile(realPrefixDir).absolutePath,
                 // dpkg has the same hardcoded admindir problem as apt, but for direct `dpkg ...`
                 // invocations (not routed through apt, which already gets Dir::State::status from
                 // the override above) - DPKG_ADMINDIR is dpkg's own env var equivalent of
                 // --admindir.
-                "DPKG_ADMINDIR" to "${realPrefixDir.absolutePath}/var/lib/dpkg",
+                "DPKG_ADMINDIR" to "$prefix/var/lib/dpkg",
+                // The CA bundle path compiled into curl/OpenSSL-based tools has the same problem
+                // as apt's (see Acquire::https::CaInfo below); both variables are standard
+                // overrides for it.
+                "SSL_CERT_FILE" to "$prefix/etc/tls/cert.pem",
+                "CURL_CA_BUNDLE" to "$prefix/etc/tls/cert.pem",
             )
             env += extra
             return env.map { (key, value) -> "$key=$value" }
@@ -102,38 +164,43 @@ class BootstrapShellSessionFactory {
         internal fun aptConfigFile(realPrefixDir: File): File =
             File(realPrefixDir.parentFile, "termaterial-apt.conf")
 
+        /** Where [BASH_RC] is written, next to [aptConfigFile]. */
+        internal fun bashRcFile(realPrefixDir: File): File =
+            File(realPrefixDir.parentFile, "termaterial-bashrc")
+
         /**
-         * apt (like bash's `/etc/profile`, see the `--noprofile` note above) has
-         * `/data/data/com.termux/files/usr` baked in at build time as its default config root
-         * (`Dir::Etc`, `Dir::State::status`, `Dir::Bin::methods`, ...) - a directory that belongs
-         * to a different app and is never reachable here, causing `apt update` to fail with
-         * "Unable to read .../etc/apt/apt.conf.d/ - Permission denied" then
-         * "Unable to determine a suitable packaging system type" (confirmed on a real device).
+         * apt (like bash's `/etc/profile`, see [createSession]) has `/data/data/com.termux` baked
+         * in at build time for its whole layout - `Dir::Etc`, `Dir::State::status`,
+         * `Dir::Bin::methods`, ..., all in a directory that belongs to a different app and is
+         * never reachable here (confirmed on a real device: "Unable to read
+         * .../etc/apt/apt.conf.d/ - Permission denied", then "Unable to determine a suitable
+         * packaging system type").
          *
          * This is the standard technique chroot tooling (schroot, sbuild, mmdebstrap) uses to
          * repoint apt at a different root at runtime: a config file, referenced via the
          * `APT_CONFIG` environment variable (read before apt resolves its own default config
          * location, unlike a file placed inside the - wrong - default `Dir::Etc`), that sets the
-         * top-level `Dir` and every `Dir::*` key apt does not resolve relative to it by default.
-         *
-         * `Acquire::https::CaInfo` is the same problem again, one level down: with `Dir` fixed,
-         * `apt update` could reach packages-cf.termux.dev but then failed TLS verification
-         * ("No system certificates available", confirmed on a real device) because apt's https
-         * method also has a compiled-in, com.termux-only default CA bundle path
-         * (`$PREFIX/etc/tls/cert.pem`, shipped by the bootstrap itself as an apt dependency, not
-         * something Acquire::https::CaInfo's `Dir::*`-style relative resolution covers).
+         * top-level `Dir` and every key apt does not resolve relative to it. The list below is
+         * every com.termux path found in the bootstrap's `libapt-pkg.so` that apt reads from its
+         * configuration:
+         * - `Dir::Cache`: Termux keeps it outside the prefix, in the app's cache directory;
+         * - `Dir::Bin::apt-key`: run to verify every repository signature;
+         * - `Dir::Bin::<compressor>`: run to decompress package indexes;
+         * - `DPkg::Path`: the `PATH` apt gives dpkg, which refuses to run without `sh` & co in it;
+         * - `Acquire::https::CaInfo`: the CA bundle of apt's https method ("No system
+         *   certificates available", confirmed on a real device before this was set).
          */
-        internal fun buildAptConfigOverride(realPrefixDir: File): String {
+        internal fun buildAptConfigOverride(realPrefixDir: File, aptCacheDir: File): String {
             val prefix = realPrefixDir.absolutePath
             return """
                 |// Generated by Termaterial at every shell session start - see
                 |// BootstrapShellSessionFactory.buildAptConfigOverride and
                 |// docs/step-2-shell-backend.md. Redirects apt away from the bootstrap's
-                |// compiled-in /data/data/com.termux/files/usr config root.
+                |// compiled-in /data/data/com.termux paths.
                 |Dir "$prefix/";
                 |Dir::State "var/lib/apt/";
                 |Dir::State::status "var/lib/dpkg/status";
-                |Dir::Cache "var/cache/apt/";
+                |Dir::Cache "${aptCacheDir.absolutePath}/";
                 |Dir::Etc "etc/apt/";
                 |Dir::Etc::sourcelist "sources.list";
                 |Dir::Etc::sourceparts "sources.list.d";
@@ -141,9 +208,19 @@ class BootstrapShellSessionFactory {
                 |Dir::Etc::preferencesparts "preferences.d";
                 |Dir::Etc::trusted "trusted.gpg";
                 |Dir::Etc::trustedparts "trusted.gpg.d";
-                |Dir::Bin::methods "$prefix/lib/apt/methods";
-                |Dir::Bin::dpkg "$prefix/bin/dpkg";
                 |Dir::Log "var/log/apt";
+                |Dir::Bin::methods "$prefix/lib/apt/methods";
+                |Dir::Bin::planners "$prefix/lib/apt/planners";
+                |Dir::Bin::solvers "$prefix/lib/apt/solvers";
+                |Dir::Bin::dpkg "$prefix/bin/dpkg";
+                |Dir::Bin::apt-key "$prefix/bin/apt-key";
+                |Dir::Bin::gzip "$prefix/bin/gzip";
+                |Dir::Bin::bzip2 "$prefix/bin/bzip2";
+                |Dir::Bin::xz "$prefix/bin/xz";
+                |Dir::Bin::lzma "$prefix/bin/lzma";
+                |Dir::Bin::lz4 "$prefix/bin/lz4";
+                |Dir::Bin::zstd "$prefix/bin/zstd";
+                |DPkg::Path "$prefix/bin";
                 |Acquire::https::CaInfo "$prefix/etc/tls/cert.pem";
                 |
             """.trimMargin()

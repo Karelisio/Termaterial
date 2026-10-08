@@ -87,6 +87,14 @@ fun BootstrapProgressScreen(
                     )
                 }
 
+                is BootstrapProgress.ApplyingFixups -> {
+                    CircularProgressIndicator()
+                    Text(
+                        text = stringResource(id = R.string.bootstrap_applying_fixups),
+                        modifier = Modifier.padding(top = 16.dp),
+                    )
+                }
+
                 is BootstrapProgress.Installed -> {
                     CircularProgressIndicator()
                 }

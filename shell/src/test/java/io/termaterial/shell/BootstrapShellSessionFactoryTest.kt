@@ -1,6 +1,7 @@
 package io.termaterial.shell
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -9,6 +10,7 @@ class BootstrapShellSessionFactoryTest {
 
     private val realPrefixDir = File("/data/user/0/io.termaterial.app/files/usr")
     private val realHomeDir = File("/data/user/0/io.termaterial.app/files/home")
+    private val aptCacheDir = File("/data/user/0/io.termaterial.app/cache/apt")
 
     private fun envMap(env: List<String>): Map<String, String> =
         env.associate {
@@ -62,11 +64,70 @@ class BootstrapShellSessionFactoryTest {
 
     @Test
     fun `apt config override redirects Dir and every Dir-prefixed key apt would otherwise resolve wrong`() {
-        val conf = BootstrapShellSessionFactory.buildAptConfigOverride(realPrefixDir)
-        assertTrue(conf.contains("Dir \"${realPrefixDir.absolutePath}/\";"))
+        val conf = BootstrapShellSessionFactory.buildAptConfigOverride(realPrefixDir, aptCacheDir)
+        val prefix = realPrefixDir.absolutePath
+        assertTrue(conf.contains("Dir \"$prefix/\";"))
         assertTrue(conf.contains("Dir::State::status \"var/lib/dpkg/status\";"))
-        assertTrue(conf.contains("Dir::Bin::methods \"${realPrefixDir.absolutePath}/lib/apt/methods\";"))
-        assertTrue(conf.contains("Dir::Bin::dpkg \"${realPrefixDir.absolutePath}/bin/dpkg\";"))
-        assertTrue(conf.contains("Acquire::https::CaInfo \"${realPrefixDir.absolutePath}/etc/tls/cert.pem\";"))
+        assertTrue(conf.contains("Dir::Bin::methods \"$prefix/lib/apt/methods\";"))
+        assertTrue(conf.contains("Dir::Bin::dpkg \"$prefix/bin/dpkg\";"))
+        assertTrue(conf.contains("Acquire::https::CaInfo \"$prefix/etc/tls/cert.pem\";"))
+    }
+
+    @Test
+    fun `apt config override covers signature checks, decompressors, dpkg's PATH and the cache`() {
+        val conf = BootstrapShellSessionFactory.buildAptConfigOverride(realPrefixDir, aptCacheDir)
+        val prefix = realPrefixDir.absolutePath
+        assertTrue(conf.contains("Dir::Bin::apt-key \"$prefix/bin/apt-key\";"))
+        assertTrue(conf.contains("Dir::Bin::xz \"$prefix/bin/xz\";"))
+        assertTrue(conf.contains("DPkg::Path \"$prefix/bin\";"))
+        assertTrue(conf.contains("Dir::Cache \"${aptCacheDir.absolutePath}/\";"))
+        assertFalse(conf.lines().filterNot { it.startsWith("//") }.any { it.contains("com.termux") })
+    }
+
+    @Test
+    fun `passes Android runtime variables through, and nothing else from the app's environment`() {
+        val env = envMap(
+            BootstrapShellSessionFactory.buildShellEnvironment(
+                realPrefixDir,
+                realHomeDir,
+                systemEnv = mapOf(
+                    "ANDROID_ROOT" to "/system",
+                    "BOOTCLASSPATH" to "/apex/x.jar",
+                    "CLASSPATH" to "/data/app/base.apk",
+                    "PATH" to "/system/bin",
+                ),
+            )
+        )
+        assertEquals("/system", env["ANDROID_ROOT"])
+        assertEquals("/apex/x.jar", env["BOOTCLASSPATH"])
+        assertFalse(env.containsKey("CLASSPATH"))
+        assertEquals("${realPrefixDir.absolutePath}/bin", env["PATH"])
+    }
+
+    @Test
+    fun `SHELL and the CA bundle variables point into the real prefix`() {
+        val env = envMap(BootstrapShellSessionFactory.buildShellEnvironment(realPrefixDir, realHomeDir))
+        assertEquals("${realPrefixDir.absolutePath}/bin/bash", env["SHELL"])
+        assertEquals("${realPrefixDir.absolutePath}/etc/tls/cert.pem", env["SSL_CERT_FILE"])
+        assertEquals("${realPrefixDir.absolutePath}/etc/tls/cert.pem", env["CURL_CA_BUNDLE"])
+    }
+
+    @Test
+    fun `bash rc file replays Termux's login sequence from the real prefix`() {
+        val rc = BootstrapShellSessionFactory.BASH_RC
+        assertTrue(rc.contains(". \"\$PREFIX/etc/profile\""))
+        assertTrue(rc.contains(". \"\$HOME/.bashrc\""))
+        assertTrue(rc.contains(". \"\$HOME/.bash_profile\""))
+        assertEquals(
+            File(realPrefixDir.parentFile, "termaterial-bashrc"),
+            BootstrapShellSessionFactory.bashRcFile(realPrefixDir),
+        )
+    }
+
+    @Test
+    fun `runtime directories include apt's partial download directories`() {
+        val dirs = BootstrapShellSessionFactory.runtimeDirectories(realPrefixDir, aptCacheDir)
+        assertTrue(File(aptCacheDir, "archives/partial") in dirs)
+        assertTrue(File(realPrefixDir, "var/lib/apt/lists/partial") in dirs)
     }
 }
