@@ -22,8 +22,11 @@ android {
         // irrelevant for a sideloaded app. See docs/step-2-shell-backend.md for the alternative
         // (vendor bash/proot into jniLibs at build time) if a higher targetSdk becomes necessary.
         targetSdk = 28
-        versionCode = 1
-        versionName = "0.1.0"
+        // CI passes its run number: every CI build then installs as an upgrade over the previous
+        // one, and update checkers like Obtainium see a new version. Local builds stay at 1.
+        val ciBuildNumber = providers.environmentVariable("GITHUB_RUN_NUMBER").orNull?.toIntOrNull()
+        versionCode = ciBuildNumber ?: 1
+        versionName = "0.2.0" + (ciBuildNumber?.let { "-debug.$it" } ?: "")
     }
 
     signingConfigs {

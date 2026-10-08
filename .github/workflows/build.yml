@@ -2,18 +2,26 @@ name: Build
 
 on:
   push:
-    branches: [main, "claude/**"]
+    branches: ["**"]
   pull_request:
   workflow_dispatch:
 
 permissions:
   contents: write # needed to publish the debug-APK release below
 
+# Superseded pull request builds are cancelled; push builds are not, so that one is never cut
+# off in the middle of publishing its release.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   ANDROID_SDK_ROOT: ${{ github.workspace }}/.android-sdk
   ANDROID_HOME: ${{ github.workspace }}/.android-sdk
   ANDROID_COMPILE_SDK_VERSION: "35"
   ANDROID_BUILD_TOOLS_VERSION: "35.0.0"
+  # Debug releases kept by the publish step below (older ones are deleted).
+  KEPT_DEBUG_RELEASES: "10"
 
 jobs:
   build:
@@ -28,10 +36,19 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      # The SDK (NDK included, ~1 GB) is only downloaded when the versions it is keyed on change.
+      - name: Cache Android SDK
+        id: android-sdk-cache
+        uses: actions/cache@v4
+        with:
+          path: .android-sdk
+          key: android-sdk-${{ runner.os }}-${{ env.ANDROID_COMPILE_SDK_VERSION }}-${{ env.ANDROID_BUILD_TOOLS_VERSION }}-${{ hashFiles('gradle.properties') }}
+
       # android-actions/setup-android@v3 is unmaintained and fails trying to install the
       # long-removed legacy "tools" package, so the Android SDK is set up by hand here: download
       # the official command-line tools and use sdkmanager directly for exactly what's needed.
       - name: Set up Android SDK (cmdline-tools)
+        if: steps.android-sdk-cache.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
           mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
@@ -40,52 +57,48 @@ jobs:
           unzip -q cmdline-tools.zip -d "$ANDROID_SDK_ROOT/cmdline-tools"
           mv "$ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools" "$ANDROID_SDK_ROOT/cmdline-tools/latest"
           rm cmdline-tools.zip
-          echo "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
-          echo "$ANDROID_SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
 
       - name: Install SDK platform, build-tools and NDK
+        if: steps.android-sdk-cache.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
+          SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
           NDK_VERSION="$(grep '^ndkVersion=' gradle.properties | cut -d= -f2)"
           # `yes` is killed by SIGPIPE once sdkmanager stops reading (all licenses accepted),
           # which trips `pipefail` even though nothing actually went wrong - ignore that.
-          yes | sdkmanager --licenses > /dev/null || true
-          sdkmanager \
+          yes | "$SDKMANAGER" --licenses > /dev/null || true
+          "$SDKMANAGER" \
             "platform-tools" \
             "platforms;android-${ANDROID_COMPILE_SDK_VERSION}" \
             "build-tools;${ANDROID_BUILD_TOOLS_VERSION}" \
             "ndk;${NDK_VERSION}"
 
-      - name: Grant execute permission for gradlew
-        run: chmod +x gradlew
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
 
-      - name: Build terminal-emulator, terminal-view and shell
-        run: ./gradlew :terminal-emulator:assembleDebug :terminal-view:assembleDebug :shell:assembleDebug --stacktrace
+      - name: Build all modules (debug)
+        run: ./gradlew assembleDebug --stacktrace
 
       - name: Run unit tests
-        run: ./gradlew :terminal-emulator:testDebugUnitTest :shell:testDebugUnitTest --stacktrace
-
-      - name: Build app (debug APK)
-        if: hashFiles('app/build.gradle.kts') != ''
-        run: ./gradlew :app:assembleDebug --stacktrace
+        run: ./gradlew :terminal-emulator:testDebugUnitTest :shell:testDebugUnitTest :app:testDebugUnitTest --stacktrace
 
       # The pty is spawned through libtermux.so (terminal-emulator's ndkBuild output). If it were
       # missing from the APK, System.loadLibrary() would throw UnsatisfiedLinkError deep inside
       # TerminalView's layout pass at runtime - so assert it is packaged, for every ABI, here.
       - name: Check native libraries are packaged in the APK
-        if: hashFiles('app/build.gradle.kts') != ''
         run: |
           set -euo pipefail
           APK="$(ls app/build/outputs/apk/debug/*.apk | head -1)"
           echo "APK: $APK"
           unzip -l "$APK" | grep '\.so$' || true
-          if ! unzip -l "$APK" | grep -q 'lib/.*/libtermux\.so'; then
-            echo "::error::libtermux.so is missing from the APK - the pty JNI library was not packaged."
-            exit 1
-          fi
+          for abi in arm64-v8a armeabi-v7a x86 x86_64; do
+            if ! unzip -l "$APK" | grep -q "lib/$abi/libtermux\.so"; then
+              echo "::error::lib/$abi/libtermux.so is missing from the APK - the pty JNI library was not packaged."
+              exit 1
+            fi
+          done
 
       - name: Upload debug APK
-        if: hashFiles('app/build.gradle.kts') != ''
         uses: actions/upload-artifact@v4
         with:
           name: termaterial-debug-apk
@@ -93,27 +106,48 @@ jobs:
 
       # Actions artifacts require a signed-in GitHub session and expire after 90 days; a Release
       # asset is a stable, directly downloadable link anyone with repo access can open in a
-      # browser - easier to fetch on a phone. One release per branch, its APK replaced each push.
+      # browser - easier to fetch on a phone. One release per build, tagged with the APK's own
+      # versionName (which embeds the run number, see app/build.gradle.kts): update checkers such
+      # as Obtainium compare that tag with the installed version, so a tag that never changed
+      # (one release per branch, its APK replaced in place) could never be seen as an update.
       - name: Publish debug APK to a release
-        if: github.event_name == 'push' && hashFiles('app/build.gradle.kts') != ''
+        if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          TAG="debug-$(echo "${{ github.ref_name }}" | tr '/' '-')"
-          NOTES="APK debug généré automatiquement par la CI à chaque push réussi sur \`${{ github.ref_name }}\`. Commit : ${{ github.sha }}."
+          APK="$(ls app/build/outputs/apk/debug/*.apk | head -1)"
+          AAPT2="$ANDROID_SDK_ROOT/build-tools/$ANDROID_BUILD_TOOLS_VERSION/aapt2"
+          VERSION_NAME="$("$AAPT2" dump badging "$APK" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p")"
+          if [ -z "$VERSION_NAME" ]; then
+            echo "::error::could not read versionName from $APK"
+            exit 1
+          fi
+          TAG="v$VERSION_NAME"
+          ASSET="termaterial-$VERSION_NAME.apk"
+          cp "$APK" "$ASSET"
+          NOTES="APK debug généré automatiquement par la CI (branche \`$GITHUB_REF_NAME\`, commit $GITHUB_SHA)."
           # Not --prerelease: Obtainium (and GitHub's own /releases/latest) resolve "latest
-          # release" by excluding prereleases, so a prerelease here is invisible to update
-          # checkers that just follow "latest" - this is still clearly a debug build via the
+          # release" by excluding prereleases - this is still clearly a debug build via the
           # tag/title, not a claim of stability.
           if gh release view "$TAG" > /dev/null 2>&1; then
-            gh release upload "$TAG" app/build/outputs/apk/debug/*.apk --clobber
-            gh release edit "$TAG" --notes "$NOTES" --prerelease=false
+            gh release upload "$TAG" "$ASSET" --clobber
           else
-            gh release create "$TAG" app/build/outputs/apk/debug/*.apk \
-              --title "Termaterial debug ($TAG)" \
-              --notes "$NOTES"
+            gh release create "$TAG" "$ASSET" \
+              --target "$GITHUB_SHA" \
+              --title "Termaterial $VERSION_NAME ($GITHUB_REF_NAME)" \
+              --notes "$NOTES" \
+              --latest
           fi
+          # Only the most recent debug releases are kept (newest first in the listing), including
+          # the older one-release-per-branch "debug-<branch>" ones.
+          gh release list --limit 200 --json tagName --jq '.[].tagName' \
+            | { grep -E '^(v.*-debug\.[0-9]+|debug-.*)$' || true; } \
+            | tail -n "+$((KEPT_DEBUG_RELEASES + 1))" \
+            | while read -r old_tag; do
+                echo "Deleting old debug release $old_tag"
+                gh release delete "$old_tag" --yes --cleanup-tag
+              done
 
       - name: Upload test reports
         if: always()
