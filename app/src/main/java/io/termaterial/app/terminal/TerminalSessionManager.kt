@@ -1,11 +1,14 @@
 package io.termaterial.app.terminal
 
 import android.content.Context
+import android.os.SystemClock
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.termux.terminal.TerminalSession
 import io.termaterial.app.CrashReporter
+import io.termaterial.app.R
 import io.termaterial.app.service.TerminalSessionService
 import io.termaterial.app.settings.SettingsRepository
 import io.termaterial.shell.BootstrapShellSessionFactory
@@ -68,6 +71,9 @@ class TerminalSessionManager(
         val id = UUID.randomUUID().toString()
         val title = mutableStateOf<String?>(null)
         val finished = mutableStateOf(false)
+        val useProot = settingsRepository.settings.value.useProot
+        val runsUnderProot = useProot && BootstrapShellSessionFactory.isProotAvailable(appContext)
+        val startedAt = SystemClock.elapsedRealtime()
         val client = AppTerminalClient(
             appContext = appContext,
             extraKeysState = extraKeysState,
@@ -77,16 +83,15 @@ class TerminalSessionManager(
             },
             onSessionFinished = {
                 finished.value = true
+                if (runsUnderProot) {
+                    tabs.firstOrNull { it.id == id }?.let { explainEarlyProotFailure(it.session, startedAt) }
+                }
                 notifyChanged()
             },
             onCloseRequested = { closeTab(id) },
             onFontSizeStep = settingsRepository::stepFontSize,
         )
-        val session = BootstrapShellSessionFactory().createSession(
-            appContext,
-            client,
-            useProot = settingsRepository.settings.value.useProot,
-        )
+        val session = BootstrapShellSessionFactory().createSession(appContext, client, useProot = useProot)
         val tab = TerminalTab(id, nextTabNumber++, session, client, title, finished)
         tabs += tab
         activeTabId = id
@@ -133,6 +138,18 @@ class TerminalSessionManager(
         closeAllTabs()
     }
 
+    /**
+     * proot is the part of the stack most likely to misbehave on a given device: when a proot
+     * session fails right after starting, say how to get a working shell back (direct mode), below
+     * whatever proot printed and TerminalSession's "[Process completed ...]" line.
+     */
+    private fun explainEarlyProotFailure(session: TerminalSession, startedAt: Long) {
+        if (session.exitStatus == 0 || SystemClock.elapsedRealtime() - startedAt > EARLY_EXIT_MS) return
+        val hint = "\r\n\u001b[33m${appContext.getString(R.string.proot_early_exit_hint)}\u001b[0m\r\n"
+        val bytes = hint.toByteArray(Charsets.UTF_8)
+        session.emulator?.append(bytes, bytes.size)
+    }
+
     private fun notifyChanged() {
         for (listener in listeners.toList()) listener()
     }
@@ -145,5 +162,10 @@ class TerminalSessionManager(
             // keep working in the foreground even if the service cannot start.
             CrashReporter.record(appContext, "TerminalSessionService.start:\n\n${e.stackTraceToString()}")
         }
+    }
+
+    private companion object {
+        /** A proot session ending sooner than this, in error, is taken as proot failing to start. */
+        const val EARLY_EXIT_MS = 5_000L
     }
 }

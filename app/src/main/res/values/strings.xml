@@ -36,4 +36,6 @@
     <string name="notification_content_single">Session active : %1$s</string>
     <string name="notification_content_multi">%1$d sessions actives</string>
     <string name="notification_action_exit">Quitter</string>
+
+    <string name="proot_early_exit_hint">proot n\'a pas pu lancer le shell. Si ça se répète : Réglages > Environnement > désactiver « Compatibilité Termux (proot) » (shell lancé directement, sans installation de paquets).</string>
 </resources>

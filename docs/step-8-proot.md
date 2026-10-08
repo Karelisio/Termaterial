@@ -81,8 +81,9 @@ sans le script (build local), le shell est lance directement comme avant
 (mode direct de l'etape 7, sans installation de paquets possible).
 
 Si proot ne demarre pas sur un appareil, son message d'erreur reste affiche
-dans l'onglet (`[Process completed ...]`) : desactiver le reglage permet de
-retrouver un shell en attendant un correctif.
+dans l'onglet (`[Process completed ...]`), suivi d'une indication (session
+proot terminee en erreur dans les 5 premieres secondes) : desactiver le
+reglage permet de retrouver un shell en attendant un correctif.
 
 ## Non verifie
 
